@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Liquid Glass in Unity: how it was made</title>
+<style>
+  :root { --ink:#1d1d1f; --mute:#6e6e73; --line:#d2d2d7; --bg:#fbfbfd; --card:#fff; --accent:#0071e3; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:17px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 48px 20px 96px; }
+  h1 { font-size: 44px; line-height:1.1; letter-spacing:-.02em; margin: 0 0 12px; }
+  h2 { font-size: 28px; letter-spacing:-.01em; margin: 72px 0 8px; }
+  h2 small { display:block; font-size:13px; color:var(--mute); font-weight:600; text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px; }
+  p { margin: 8px 0 16px; }
+  .lead { color:var(--mute); font-size:20px; }
+  figure { margin: 20px 0 28px; }
+  figure img { width:100%; display:block; border-radius:14px; border:1px solid var(--line); background:#fff; }
+  figcaption { color:var(--mute); font-size:14px; margin-top:8px; }
+  .two { display:grid; grid-template-columns: 1fr 1fr; gap:14px; }
+  .two figure { margin:0; }
+  .tag { display:inline-block; font-size:12px; font-weight:700; padding:2px 8px; border-radius:99px; background:#e8e8ed; color:var(--ink); margin-right:6px; }
+  .bad { background:#ffe3e0; color:#b3261e; } .good { background:#dff6e4; color:#1b6e2e; }
+  pre, code { font: 13.5px/1.5 ui-monospace, "SF Mono", Menlo, monospace; }
+  pre { background:#1d1d1f; color:#f5f5f7; padding:14px 16px; border-radius:12px; overflow:auto; margin:12px 0 20px; }
+  pre .k { color:#ff7ab2; } pre .n { color:#d9c97c; } pre .c { color:#7f8c98; } pre .v { color:#6bdfff; }
+  .lab { background:var(--card); border:1px solid var(--line); border-radius:18px; padding:14px; margin: 20px 0 28px; }
+  .lab canvas.gl { width:100%; display:block; border-radius:10px; touch-action:none; cursor:grab; }
+  .lab .row { display:grid; grid-template-columns: 1.4fr 1fr; gap:14px; align-items:start; }
+  .ctl { display:grid; grid-template-columns: 110px 1fr 46px; gap:4px 8px; align-items:center; font-size:14px; margin-top:12px; }
+  .ctl input[type=range] { width:100%; accent-color: var(--accent); }
+  .ctl output { font: 13px ui-monospace, Menlo, monospace; color:var(--mute); text-align:right; }
+  .ctl .chk { grid-column: 1 / -1; display:flex; gap:16px; flex-wrap:wrap; }
+  .hint { color:var(--mute); font-size:13px; margin-top:6px; }
+  canvas.plot { width:100%; background:#fff; border:1px solid var(--line); border-radius:10px; display:block; }
+  .bugs { display:grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap:12px; }
+  .bug { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:12px 14px; font-size:15px; }
+  .bug b { display:block; margin-bottom:4px; }
+  .bug img { width:100%; border-radius:8px; margin-top:8px; border:1px solid var(--line); }
+  .bug .fix { color:#1b6e2e; font-size:14px; margin-top:6px; }
+  svg text { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; }
+  @media (max-width: 680px) { .two, .lab .row { grid-template-columns: 1fr; } h1 { font-size:34px; } }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Liquid Glass in Unity</h1>
+<p class="lead">Apple's iOS 26 glass, rebuilt as a Unity shader and matched against Apple's own glass by measuring screenshots. Below are the steps, the mistakes, and the live shader for you to tune.</p>
+
+<div class="two">
+  <figure><img src="img/apple.png" alt="Apple's glass over a test grid"><figcaption>Apple, SwiftUI <code>.glassEffect(.clear)</code></figcaption></figure>
+  <figure><img src="img/ours.png" alt="Our glass over the same grid"><figcaption>Unity, this shader. The coloured dots are measurement markers.</figcaption></figure>
+</div>
+
+<!-- 1 -->
+<h2><small>Step 1</small>Get the real thing on a test grid</h2>
+<p>To copy Apple's glass we first had to see it. We rendered Apple's own glass over a grid whose distortion we could measure.</p>
+<pre><span class="c">// Apple's glass over a 220 × 140 pt test grid: lines every 10 pt, red diagonals every 25 pt.</span>
+<span class="k">ZStack</span>(alignment: .topLeading) {
+    <span class="n">Grid</span>().frame(width: <span class="v">220</span>, height: <span class="v">140</span>)
+    Color.clear.frame(width: <span class="v">56</span>, height: <span class="v">56</span>).<span class="k">glassEffect</span>(.clear, in: Circle()).offset(x: <span class="v">40</span>, y: <span class="v">30</span>)
+    Color.clear.frame(width: <span class="v">180</span>, height: <span class="v">56</span>).<span class="k">glassEffect</span>(.clear, in: Capsule()).offset(x: <span class="v">20</span>, y: <span class="v">70</span>)
+}</pre>
+<figure><img src="img/apple_board.png" alt="Apple's glass board"><figcaption>The reference. Inside the capsule straight lines bend into “S” shapes, and the circle shows a four-leaf knot. That is not magnification.</figcaption></figure>
+
+<!-- 2 -->
+<h2><small>Mistake 1</small>“It's a magnifying lens”</h2>
+<figure><img src="img/early.png" alt="Early attempts"><figcaption><span class="tag bad">wrong</span> The first versions were a bulging magnifier with a dark crescent of “thickness”. They were smooth and pretty, and nothing like the reference.</figcaption></figure>
+
+<!-- 3 -->
+<h2><small>Step 2</small>The glass is a remap</h2>
+<p>Each point of the glass shows the backdrop from somewhere else, and that place depends only on how far the point is from the shape's middle line. Let <i>x</i> be that distance, scaled to run from 0 on the middle line to 1 on the outline. Near the rim the sampled position swings past the middle to the far side, so the rim shows what lies <i>across</i> the button, and straight lines fold into arcs.</p>
+<pre id="formula"></pre>
+
+<div class="lab" id="lab1">
+  <div class="row">
+    <canvas class="gl" width="900" height="560"></canvas>
+    <div>
+      <canvas class="plot" width="520" height="360"></canvas>
+      <div class="hint">Where the glass samples (y) at each distance from the middle (x). The dashed line is flat glass.</div>
+    </div>
+  </div>
+  <div class="ctl" data-params="magnify rimReach rimPower edgeReach lens" data-preset="profile"></div>
+  <div class="hint">Drag the glass. Frost is off here, so you see the bare remap.</div>
+</div>
+
+<h2><small>Step 3</small>Fit it to Apple's</h2>
+<figure><img src="img/fitting.png" alt="Fitting progression"><figcaption>Seven rounds of fitting, in order; the last tile is Apple's, the target. Each round was compared with Apple's board by eye and by script: where the lines cross the rim, how thick the fold is, how bright the glass is. The final profile is g(x) = x − 1.5·x⁴, plus a thin fold right at the edge.</figcaption></figure>
+
+<!-- 4 -->
+<h2><small>Step 4</small>Frost: blur what you refracted</h2>
+<p>Apple's glass is slightly milky. Blurring the backdrop first and then refracting it looked wrong: the squeezed rim broke into thin, sharp copies of each line. The fix is to blur the <i>refracted</i> image. Each of 32 taps on a golden-angle spiral is refracted where it lands.</p>
+<p>A tap that reads the full-resolution image still produces ghost copies. Turn off <b>mip per tap</b> below to see them. Reading a mip level about as wide as the gap between taps smears a thin line into one soft band.</p>
+
+<div class="lab" id="lab2">
+  <canvas class="gl" width="900" height="560"></canvas>
+  <div class="ctl" data-params="frost frostRadius sourceBlur contrast" data-checks="mipTaps" data-preset="frost"></div>
+</div>
+
+<pre><span class="k">for</span> (<span class="k">int</span> i = <span class="v">0</span>; i &lt; <span class="v">32</span>; i++) {
+    <span class="k">float</span> an = i * <span class="v">2.39996</span>;                          <span class="c">// golden angle</span>
+    <span class="k">float</span> rr = sqrt((i + <span class="v">.5</span>) / <span class="v">32</span>);
+    <span class="k">float2</span> o = float2(cos(an), sin(an)) * rr * _FrostRadius;
+    <span class="k">float2</span> ts = <span class="n">LiquidShift</span>(p + o, ...);              <span class="c">// refract each tap where it lands</span>
+    <span class="k">float</span> w = exp(<span class="v">-4.5</span> * rr * rr);                      <span class="c">// gaussian, not a disc</span>
+    soft += w * tex2Dlod(_SharpTex, float4(uv + (o * (<span class="v">1</span> + _SourceBlur) + ts) * toUv, <span class="v">0</span>, <span class="n">lod</span>)).rgb;
+}</pre>
+
+<!-- 5 -->
+<h2><small>Step 5</small>Light</h2>
+<p>Apple's rim is not a white line drawn on top. It is the light the glass bends into the rim, so a yellow card on one side turns the opposite edge yellow. A hairline catches the light on the side facing it and on the opposite side. With <b>matte</b> (Apple's Clear and Regular switch) the glass turns whiter, softer and more saturated, and a capsule gets a soft highlight.</p>
+
+<div class="lab" id="lab3">
+  <canvas class="gl" width="900" height="560"></canvas>
+  <div class="ctl" data-params="specular lightAngle rimWhite matte brightness saturation" data-checks="pill" data-preset="light"></div>
+</div>
+
+<div class="two">
+  <figure><img src="img/apple_clear.png" alt="Apple clear"><figcaption>Apple <code>.clear</code></figcaption></figure>
+  <figure><img src="img/apple_regular.png" alt="Apple regular"><figcaption>Apple <code>.regular</code>. Measured against .clear: 47% whiter, blurred 2 pt more, 1.4× the saturation.</figcaption></figure>
+</div>
+
+<figure><img src="img/close_cutout.png" alt="Reference on real art"><figcaption>The same check on real art: the game's frame, with Apple's own glass ✕ (via SwiftUI) placed exactly where our button sits.</figcaption></figure>
+<figure><img src="img/edge.png" alt="Close-up"><figcaption>Close-up: Apple's glass in the middle (its own ✕), ours on either side. The rims take on the colours from across the button.</figcaption></figure>
+
+<!-- 6 -->
+<h2><small>Step 6</small>Putting it in a real UI: the frame's last pass</h2>
+<p>Glass needs the finished picture under it, including popups, scrolling lists and video, in the same frame. Sampling the scene in advance always lagged one frame or missed something. So the glass is drawn <i>after everything else</i>:</p>
+
+<svg viewBox="0 0 820 300" width="100%" role="img" aria-label="Frame pass diagram">
+  <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#6e6e73"/></marker></defs>
+  <g font-size="14">
+    <rect x="10" y="20" width="180" height="110" rx="14" fill="#fff" stroke="#d2d2d7"/>
+    <text x="100" y="48" text-anchor="middle" font-weight="700">1 · UI draws</text>
+    <text x="100" y="72" text-anchor="middle" fill="#6e6e73">button = marker</text>
+    <text x="100" y="92" text-anchor="middle" fill="#6e6e73">alpha 0, colour kept</text>
+    <text x="100" y="112" text-anchor="middle" fill="#6e6e73">popup writes alpha back</text>
+    <rect x="220" y="20" width="180" height="110" rx="14" fill="#fff" stroke="#d2d2d7"/>
+    <text x="310" y="48" text-anchor="middle" font-weight="700">2 · End of frame</text>
+    <text x="310" y="72" text-anchor="middle" fill="#6e6e73">copy the screen</text>
+    <text x="310" y="92" text-anchor="middle" fill="#6e6e73">+ mips for the frost</text>
+    <rect x="430" y="20" width="180" height="110" rx="14" fill="#fff" stroke="#d2d2d7"/>
+    <text x="520" y="48" text-anchor="middle" font-weight="700">3 · Layer</text>
+    <text x="520" y="72" text-anchor="middle" fill="#6e6e73">glass from the copy</text>
+    <text x="520" y="92" text-anchor="middle" fill="#6e6e73">+ icons and text</text>
+    <rect x="640" y="20" width="170" height="110" rx="14" fill="#fff" stroke="#d2d2d7"/>
+    <text x="725" y="48" text-anchor="middle" font-weight="700">4 · Composite</text>
+    <text x="725" y="72" text-anchor="middle" fill="#6e6e73">layer × (1 − alpha)</text>
+    <text x="725" y="92" text-anchor="middle" fill="#6e6e73">only where markers</text>
+    <text x="725" y="112" text-anchor="middle" fill="#6e6e73">survived</text>
+    <path d="M190 75 H218" stroke="#6e6e73" stroke-width="2" marker-end="url(#ar)"/>
+    <path d="M400 75 H428" stroke="#6e6e73" stroke-width="2" marker-end="url(#ar)"/>
+    <path d="M610 75 H638" stroke="#6e6e73" stroke-width="2" marker-end="url(#ar)"/>
+  </g>
+  <g font-size="13">
+    <rect x="10" y="170" width="380" height="110" rx="14" fill="#f5f5f7"/>
+    <text x="24" y="196" font-weight="700">Why a marker?</text>
+    <text x="24" y="220" fill="#1d1d1f">The glass pass runs after the UI, so it cannot</text>
+    <text x="24" y="240" fill="#1d1d1f">know what was drawn over a button. Alpha 0 is a</text>
+    <text x="24" y="260" fill="#1d1d1f">note left in the frame: “still uncovered here”.</text>
+    <rect x="430" y="170" width="380" height="110" rx="14" fill="#f5f5f7"/>
+    <text x="444" y="196" font-weight="700">Why a layer?</text>
+    <text x="444" y="220" fill="#1d1d1f">A popup covering half a button must hide that</text>
+    <text x="444" y="240" fill="#1d1d1f">half of its glass AND of its label. Both go into</text>
+    <text x="444" y="260" fill="#1d1d1f">one layer, which is cut by the marker in one step.</text>
+  </g>
+</svg>
+
+<figure><img src="img/demo_variants.png" alt="Demo variants"><figcaption>The package's demo in the iOS simulator. Left to right: <code>matte = 1</code>; a popup over half the card (its glass and its label are hidden under it); a CanvasGroup fade of 0.4; lens off.</figcaption></figure>
+
+<!-- 7 -->
+<h2><small>Bugs</small>What broke on the way</h2>
+<div class="bugs">
+  <div class="bug"><b>The frame copy came out upside down</b>On Metal the screen copy's origin is the top, so every button refracted the wrong half of the screen.<img src="img/upside_down.png" alt="Upside-down copy"><div class="fix">Flip by <code>SystemInfo.graphicsUVStartsAtTop</code>.</div></div>
+  <div class="bug"><b>The ✕ turned bold</b>The button's content was copied into a texture 104 px wide and drawn back at 98 px. The mips blurred it, and premultiplying already-straight alpha whitened its soft edge.<img src="img/bold_x.png" alt="Bold vs sharp"><div class="fix">Copy pixel-exact on the screen grid, with no mips and straight alpha.</div></div>
+  <div class="bug"><b>Glass showed the neighbouring sticker</b>In a scaled collection, <code>worldBound</code> came back 1.3× the drawn size.<div class="fix">Compute placement from layout, translate and scale down the hierarchy.</div></div>
+  <div class="bug"><b>Ghost copies in the frost</b>32 sharp taps show a thin line 32 times.<div class="fix">Each tap reads a mip about as wide as the gap between taps (Step 4).</div></div>
+  <div class="bug"><b>Double gamma</b>The glass came out washed out: colours were converted to linear once when copied and once more when drawn back.<div class="fix">Both sides use raw linear render textures. Only uGUI's gamma vertex colours are converted.</div></div>
+  <div class="bug"><b>Refraction lagged a scroll</b>A ScrollView's fling moved only every other frame at 120 Hz, so the glass decided the list had stopped and dropped to 12 fps.<div class="fix">Removed by design: the frame's last pass always sees the current frame.</div></div>
+  <div class="bug"><b>Text vanished on a fading page</b>The fade mesh copied TextMeshPro's UVs as <code>Vector2</code>, and TMP keeps glyph scale in <code>uv0.zw</code>.<div class="fix">Copy all four UV channels as <code>Vector4</code>.</div></div>
+  <div class="bug"><b>Prices missing on hint buttons</b>TMP takes its depth test from the global <code>unity_GUIZTestMode</code>, which the last canvas left at LEqual.<div class="fix">Set it to Always before drawing content.</div></div>
+  <div class="bug"><b>643 copies of one button</b>The glass was re-registered every time a page rebuilt.<div class="fix">One registration per element, removed on <code>DetachFromPanelEvent</code>.</div></div>
+  <div class="bug"><b>Fresh projects crashed</b>The button was hidden with an <code>opacity()</code> filter, and builds that use no filters strip that filter's shader.<div class="fix">Hide the button with opacity 0. A parent's fade still applies.</div></div>
+</div>
+
+<!-- 8 -->
+<h2><small>Use it</small>Two lines</h2>
+<pre><span class="c">// Package Manager → Install from git URL: https://github.com/frodiwe/UnityLiquidGlass.git</span>
+<span class="c">// uGUI: add the Liquid Glass Button component. UI Toolkit:</span>
+<span class="k">using</span> UnityLiquidGlass;
+LiquidGlass.<span class="n">Toolkit</span>(myButton);
+LiquidGlass.Settings.matte = <span class="v">1</span>;   <span class="c">// Apple's .regular</span></pre>
+<p><a href="https://github.com/frodiwe/UnityLiquidGlass">github.com/frodiwe/UnityLiquidGlass</a></p>
+
+</main>
+
+<script>
+// A WebGL2 port of LiquidGlass.cginc: the same lens over a test grid, in your browser.
+const DEFAULTS = { liquid:1, magnify:1, rimReach:-1.5, rimPower:4, lens:1, frost:1, frostRadius:2.7, sourceBlur:.5, contrast:1.3,
+  saturation:1.3, brightness:1.1, tint:.04, specular:1.4, lightAngle:135, rimWhite:.25, edgeReach:-.2, edgePower:60, matte:0, highlight:.13,
+  mipTaps:true, pill:true };
+const RANGES = { magnify:[.5,2,.01], rimReach:[-3,1,.01], rimPower:[1,10,.1], edgeReach:[-1,.5,.01], lens:[0,2,.01], frost:[0,1,.01],
+  frostRadius:[0,10,.1], sourceBlur:[0,2,.05], contrast:[.5,2,.05], specular:[0,3,.05], lightAngle:[0,360,1], rimWhite:[0,1,.01],
+  matte:[0,1,.01], brightness:[.8,1.4,.01], saturation:[0,2,.05] };
+const PRESETS = { profile:{ frost:0, specular:0, tint:0, brightness:1, saturation:1 }, frost:{}, light:{} };
+
+const VS = `#version 300 es
+in vec2 a; out vec2 v; void main(){ v = a*.5+.5; gl_Position = vec4(a,0,1); }`;
+const FS = `#version 300 es
+precision highp float;
+uniform sampler2D T; uniform vec2 R; uniform vec4 G; uniform float U, RAD;
+uniform float liquid, magnify, rimReach, rimPower, lens, frost, frostRadius, sourceBlur, contrast, saturation, brightness, tint,
+  specular, rimWhite, edgeReach, edgePower, highlight, mipTaps; uniform vec2 L;
+in vec2 v; out vec4 o;
+float dist(vec2 p, vec2 h, float rad, out vec2 n){
+  float r = rad > 0. ? min(rad, min(h.x,h.y)) : min(h.x,h.y);
+  vec2 q = abs(p) - h + r;
+  vec2 g = (q.x > 0. && q.y > 0.) ? normalize(q) : (q.x > q.y ? vec2(1,0) : vec2(0,1));
+  n = g * (step(0., p) * 2. - 1.);
+  return length(max(q, 0.)) + min(max(q.x, q.y), 0.) - r;
+}
+vec2 shift(vec2 p, vec2 h, out float x, out float d, out vec2 n){
+  d = dist(p, h, RAD, n); float Rr = min(h.x,h.y);
+  x = clamp((Rr + d) / Rr, 0., 1.);
+  float a = 1. / magnify, b = 1. + rimReach - a;
+  float edge = edgeReach * pow(x, max(edgePower, 1.));
+  return n * (a*x + b*pow(x, rimPower) + edge - x) * Rr * lens;
+}
+void main(){
+  vec2 px = v * R; vec2 uv = v;
+  vec3 bg = texture(T, uv).rgb;
+  vec2 p = (px - G.xy) / U, h = G.zw / U, toUv = U / R;
+  float x, d; vec2 n; vec2 s = shift(p, h, x, d, n);
+  vec3 sharp = texture(T, uv + s * toUv).rgb;
+  vec3 soft = vec3(0); float ws = 0.;
+  float lod = mipTaps > .5 ? log2(max(1., frostRadius * (1. + sourceBlur) * .45 * U)) : 0.;
+  for (int i = 0; i < 32; i++){
+    float an = float(i) * 2.39996, rr = sqrt((float(i) + .5) / 32.);
+    vec2 off = vec2(cos(an), sin(an)) * rr * frostRadius;
+    float tx, td; vec2 tn; vec2 ts = shift(p + off, h, tx, td, tn);
+    float w = exp(-4.5 * rr * rr);
+    soft += w * textureLod(T, uv + (off * (1. + sourceBlur) + ts) * toUv, lod).rgb; ws += w;
+  }
+  soft /= ws;
+  vec3 wide = textureLod(T, uv + s * toUv, lod + 2.5).rgb;
+  soft = max(wide + (soft - wide) * contrast, 0.);
+  float Rr = min(h.x,h.y), a = 1. / magnify, b = 1. + rimReach - a;
+  float slope = abs(a + rimPower * b * pow(x, rimPower - 1.));
+  float sq = clamp((slope - 1.) / max(abs(a + rimPower * b) - 1., 1e-3), 0., 1.);
+  float facing = dot(n, normalize(L));
+  float hair = 1. - smoothstep(0., 1.2, -d);
+  vec3 refr = mix(sharp, soft, frost);
+  vec3 rimTint = mix(refr, vec3(1), rimWhite);
+  vec3 rim = rimTint * (liquid * specular * (d < 0. ? 1. : 0.) * (.08*sq*sq*(.75+.25*facing) + .4*hair*facing*facing));
+  if (h.x > h.y * 1.5) {
+    vec2 hc = vec2(-h.x + 1.7*Rr, h.y - .375*Rr);
+    float he = length((p - hc) / vec2(.54*Rr, .2*Rr));
+    rim += liquid * highlight * smoothstep(1.3, .7, he);
+  }
+  vec3 g = mix(bg, refr, liquid);
+  float grey = dot(g, vec3(.299,.587,.114));
+  g = max(grey + (g - grey) * saturation, 0.);
+  g = mix(g * brightness, vec3(1), tint) + rim;
+  float aa = max(fwidth(d), 1e-3);
+  float cover = 1. - smoothstep(-aa*.5, aa*.5, d);
+  o = vec4(mix(bg, g, cover), 1);
+}`;
+
+function backdrop(w, h, u){
+  // Apple's test grid (tan paper, lines every 10 pt, red diagonals every 25 pt), plus a few colour cards.
+  const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d');
+  g.fillStyle = 'rgb(217,179,128)'; g.fillRect(0,0,w,h);
+  const cards = [['#ffd23f', .12, .18], ['#3f8cff', .78, .62], ['#3fc46b', .52, .12], ['#ff5a4e', .3, .78]];
+  for (const [col, x, y] of cards){ g.fillStyle = col; g.beginPath(); g.roundRect(x*w - 22*u, y*h - 16*u, 44*u, 32*u, 8*u); g.fill(); }
+  g.strokeStyle = 'rgb(204,26,26)'; g.lineWidth = .8*u;
+  for (let k = -h; k < w + h; k += 25*u){ g.beginPath(); g.moveTo(k, 0); g.lineTo(k - h, h); g.stroke(); }
+  g.fillStyle = 'rgb(38,38,77)';
+  for (let x = 0; x <= w; x += 10*u) g.fillRect(Math.round(x), 0, Math.max(1, u), h);
+  for (let y = 0; y <= h; y += 10*u) g.fillRect(0, Math.round(y), w, Math.max(1, u));
+  return c;
+}
+
+function lab(root){
+  const cv = root.querySelector('canvas.gl'), plot = root.querySelector('canvas.plot'), ctl = root.querySelector('.ctl');
+  const P = Object.assign({}, DEFAULTS, PRESETS[ctl.dataset.preset] || {});
+  const gl = cv.getContext('webgl2', { antialias:false });
+  if (!gl){ cv.replaceWith(Object.assign(document.createElement('p'), { textContent:'WebGL2 is not available in this browser.' })); return; }
+  const U = cv.width / 300;   // the canvas spans 300 points
+  const sh = (t, s) => { const o = gl.createShader(t); gl.shaderSource(o, s); gl.compileShader(o); if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(o)); return o; };
+  const pr = gl.createProgram(); gl.attachShader(pr, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(pr); gl.useProgram(pr);
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer()); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,3,-1,-1,3]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  const tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, backdrop(cv.width, cv.height, U));
+  gl.generateMipmap(gl.TEXTURE_2D);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const loc = n => gl.getUniformLocation(pr, n);
+  let cx = cv.width * .5, cy = cv.height * .5;
+
+  function draw(){
+    const pill = P.pill, hw = (pill ? 90 : 40) * U, hh = (pill ? 28 : 40) * U;
+    const m = Math.min(1, Math.max(0, P.matte));
+    gl.viewport(0, 0, cv.width, cv.height);
+    gl.uniform2f(loc('R'), cv.width, cv.height); gl.uniform4f(loc('G'), cx, cy, hw, hh);
+    gl.uniform1f(loc('U'), U); gl.uniform1f(loc('RAD'), 0);
+    const f = { ...P, tint: 1 - (1 - P.tint) * (1 - .47*m), frostRadius: P.frostRadius + 2*m, highlight: P.highlight*m, saturation: P.saturation + .4*m };
+    for (const k of ['liquid','magnify','rimReach','rimPower','lens','frost','frostRadius','sourceBlur','contrast','saturation','brightness','tint','specular','rimWhite','edgeReach','edgePower','highlight'])
+      gl.uniform1f(loc(k), f[k]);
+    gl.uniform1f(loc('mipTaps'), P.mipTaps ? 1 : 0);
+    const an = P.lightAngle * Math.PI / 180; gl.uniform2f(loc('L'), Math.cos(an), Math.sin(an));
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    if (plot) drawPlot();
+    if (root.id === 'lab1') formula();
+  }
+
+  function drawPlot(){
+    const g = plot.getContext('2d'), W = plot.width, H = plot.height, pad = 36;
+    g.clearRect(0,0,W,H);
+    const X = x => pad + 4 + x * (W - 2*pad - 8), Y = y => H/2 - y * (H/2 - pad) / 2;
+    g.strokeStyle = '#e5e5ea'; g.lineWidth = 1;
+    for (const y of [-2,-1,0,1,2]){ g.beginPath(); g.moveTo(pad, Y(y)); g.lineTo(W-pad, Y(y)); g.stroke(); }
+    g.fillStyle = '#6e6e73'; g.font = '20px -apple-system, sans-serif';
+    g.fillText('middle', X(0) - 20, H - 8); g.fillText('rim', X(1) - 24, H - 8);
+    g.fillText('+1', 2, Y(1) + 7); g.fillText('0', 12, Y(0) + 7); g.fillText('−1', 2, Y(-1) + 7); g.fillText('far side', pad + 4, Y(-1.75));
+    g.setLineDash([5,4]); g.strokeStyle = '#aeaeb2'; g.beginPath(); g.moveTo(X(0), Y(0)); g.lineTo(X(1), Y(1)); g.stroke(); g.setLineDash([]);
+    const a = 1 / P.magnify, b = 1 + P.rimReach - a;
+    g.strokeStyle = '#0071e3'; g.lineWidth = 3; g.beginPath();
+    for (let i = 0; i <= 200; i++){ const x = i/200; const y = (a*x + b*Math.pow(x, P.rimPower) + P.edgeReach*Math.pow(x, Math.max(1,P.edgePower)) - x) * P.lens + x;
+      i ? g.lineTo(X(x), Y(y)) : g.moveTo(X(x), Y(y)); }
+    g.stroke();
+  }
+
+  function formula(){
+    const a = 1 / P.magnify, b = 1 + P.rimReach - a, f = n => (Math.round(n*100)/100).toString();
+    document.getElementById('formula').innerHTML =
+      `<span class="c">// sampled at U = R · g(x), x: 0 on the middle line, 1 on the outline</span>\n` +
+      `g(x) = <span class="v">${f(a)}</span>·x <span class="k">+</span> <span class="v">${f(b)}</span>·x^<span class="v">${f(P.rimPower)}</span> <span class="k">+</span> <span class="v">${f(P.edgeReach)}</span>·x^<span class="v">${f(P.edgePower)}</span>` +
+      `   <span class="c">// 1/magnify, 1 + rimReach − 1/magnify, edgeReach</span>`;
+  }
+
+  for (const k of (ctl.dataset.params || '').split(' ').filter(Boolean)){
+    const [lo, hi, st] = RANGES[k];
+    const lab = document.createElement('label'); lab.textContent = k;
+    const r = Object.assign(document.createElement('input'), { type:'range', min:lo, max:hi, step:st, value:P[k] });
+    const out = document.createElement('output'); out.textContent = (+P[k]).toFixed(2);
+    r.oninput = () => { P[k] = +r.value; out.textContent = (+r.value).toFixed(2); draw(); };
+    ctl.append(lab, r, out);
+  }
+  const checks = (ctl.dataset.checks || '').split(' ').filter(Boolean);
+  const box = document.createElement('div'); box.className = 'chk';
+  for (const k of checks){
+    const l = document.createElement('label'); const c = Object.assign(document.createElement('input'), { type:'checkbox', checked:P[k] });
+    c.onchange = () => { P[k] = c.checked; draw(); }; l.append(c, ' ', k === 'mipTaps' ? 'mip per tap' : k === 'pill' ? 'capsule (off: circle)' : k); box.append(l);
+  }
+  const sh2 = document.createElement('label'); const sc = Object.assign(document.createElement('input'), { type:'checkbox', checked:P.pill });
+  if (!checks.includes('pill')){ sc.onchange = () => { P.pill = sc.checked; draw(); }; sh2.append(sc, ' capsule (off: circle)'); box.append(sh2); }
+  ctl.append(box);
+
+  let drag = false;
+  const at = e => { const r = cv.getBoundingClientRect(); cx = (e.clientX - r.left) / r.width * cv.width; cy = (1 - (e.clientY - r.top) / r.height) * cv.height; draw(); };
+  cv.onpointerdown = e => { drag = true; cv.setPointerCapture(e.pointerId); at(e); };
+  cv.onpointermove = e => { if (drag) at(e); };
+  cv.onpointerup = () => drag = false;
+  draw();
+}
+document.querySelectorAll('.lab').forEach(lab);
+</script>
+</body>
+</html>

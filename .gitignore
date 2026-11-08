@@ -1,0 +1,6 @@
+# Unity ignores folders ending in ~; git must not (a global *~ rule would drop them).
+!Samples~/
+!Samples~/**
+!Documentation~/
+!Documentation~/**
+.DS_Store

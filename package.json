@@ -1,0 +1,17 @@
+{
+  "name": "com.frodiwe.liquidglass",
+  "version": "1.0.0",
+  "displayName": "Liquid Glass",
+  "description": "Apple's iOS 26 Liquid Glass for Unity UI (uGUI and UI Toolkit). Refracts exactly what is on screen under each button, drawn as the frame's last pass, with no frame of delay. Matched against Apple's own .glassEffect.",
+  "unity": "6000.3",
+  "dependencies": {
+    "com.unity.ugui": "2.0.0",
+    "com.unity.modules.uielements": "1.0.0"
+  },
+  "keywords": ["liquid glass", "glass", "ui", "ios", "blur", "refraction"],
+  "author": { "name": "frodiwe", "url": "https://github.com/frodiwe" },
+  "license": "MIT",
+  "samples": [
+    { "displayName": "Demo", "description": "A scene built from code: uGUI and UI Toolkit glass buttons over a moving backdrop.", "path": "Samples~/Demo" }
+  ]
+}

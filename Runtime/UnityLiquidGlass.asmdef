@@ -1,0 +1,9 @@
+{
+    "name": "UnityLiquidGlass",
+    "rootNamespace": "UnityLiquidGlass",
+    "references": [
+        "UnityEngine.UI",
+        "Unity.TextMeshPro"
+    ],
+    "autoReferenced": true
+}
