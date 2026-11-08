@@ -23,6 +23,7 @@ namespace UnityLiquidGlass
         {
             public VisualElement Element;
             public float Radius;
+            public Sprite Shape;
             public ToolkitContentCopy Copy;
         }
 
@@ -42,7 +43,8 @@ namespace UnityLiquidGlass
             MainTex = Shader.PropertyToID("_MainTex"), Premultiplied = Shader.PropertyToID("_Premultiplied"),
             ToLinear = Shader.PropertyToID("_ToLinear"), Fade = Shader.PropertyToID("_Fade"),
             LayerTex = Shader.PropertyToID("_Layer"), FrameTex = Shader.PropertyToID("_Frame"),
-            LayerScreen = Shader.PropertyToID("_LayerScreen"), GuiZTest = Shader.PropertyToID("unity_GUIZTestMode");
+            LayerScreen = Shader.PropertyToID("_LayerScreen"), ShapeTex = Shader.PropertyToID("_ShapeTex"),
+            ShapeUV = Shader.PropertyToID("_ShapeUV"), ShapeTexels = Shader.PropertyToID("_ShapeTexels"), GuiZTest = Shader.PropertyToID("unity_GUIZTestMode");
         static readonly Vector3[] Corners = new Vector3[4];
         static readonly List<Graphic> Scratch = new();
         static readonly List<Vector4> Uvs = new();
@@ -128,9 +130,12 @@ namespace UnityLiquidGlass
 
         void LateUpdate()
         {
-            // Content added to a button later (a badge) gets its marker too.
+            // Content added to a button later (a badge) gets its marker too. Custom shapes' fields
+            // are built here, outside the frame pass.
+            foreach (var t in _toolkit) ShapeField.Of(t.Shape);
             foreach (var b in _buttons)
             {
+                ShapeField.Of(b.shape);
                 var list = _content[b];
                 b.GetComponentsInChildren(true, Scratch);
                 foreach (var g in Scratch)
@@ -199,7 +204,7 @@ namespace UnityLiquidGlass
                 float inset = b.inset * units;
                 r = Rect.MinMaxRect(r.xMin + inset, r.yMin + inset, r.xMax - inset, r.yMax - inset);
                 if (r.width <= 0 || r.height <= 0) continue;
-                Glass(r, units, b.cornerRadius, alpha, flip);
+                Glass(r, units, b.cornerRadius, b.shape, alpha, flip);
                 drew = true;
                 foreach (var g in _content[b]) DrawContent(g);
             }
@@ -223,7 +228,7 @@ namespace UnityLiquidGlass
                 float toScreen = w / Mathf.Max(1f, panel.visualTree.worldBound.width);
                 var r = PanelToScreen(t.Element.worldBound, toScreen, h);
                 if (r.width <= 0 || r.height <= 0) continue;
-                Glass(r, toScreen, t.Radius, alpha, flip);
+                Glass(r, toScreen, t.Radius, t.Shape, alpha, flip);
                 if (t.Copy.Texture != null && t.Copy.Crop.width > 0)
                     // Unity's own render texture reads right side up in a quad on every API; it holds straight alpha.
                     TexQuad(PanelToScreen(t.Copy.Crop, toScreen, h), t.Copy.Texture, alpha, premultiplied: false);
@@ -231,8 +236,16 @@ namespace UnityLiquidGlass
             GL.PopMatrix();
         }
 
-        void Glass(Rect r, float units, float radius, float alpha, float flip)
+        void Glass(Rect r, float units, float radius, Sprite shape, float alpha, float flip)
         {
+            if (shape != null && ShapeField.Of(shape) is { } field)
+            {
+                _glass.SetTexture(ShapeTex, field.Texture);
+                _glass.SetVector(ShapeUV, field.Uv);
+                _glass.SetVector(ShapeTexels, field.Texels);
+                radius = -1f;
+            }
+            else radius = Mathf.Max(0f, radius);
             _glass.SetVector(GlassRect, new Vector4(r.center.x, r.center.y, r.width * .5f, r.height * .5f));
             _glass.SetVector(GlassShape, new Vector4(units, radius, alpha, flip));
             _glass.SetPass(0);

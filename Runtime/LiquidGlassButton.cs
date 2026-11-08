@@ -14,6 +14,8 @@ namespace UnityLiquidGlass
         public float cornerRadius;
         [Tooltip("Transparent margin around the glass inside this rect, in canvas units.")]
         public float inset;
+        [Tooltip("A custom shape: the glass takes this sprite's outline (its alpha), stretched over the rect. Empty = a rounded box.")]
+        public Sprite shape;
 
         internal Graphic Shape;
 

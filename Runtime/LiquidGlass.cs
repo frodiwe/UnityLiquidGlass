@@ -45,12 +45,17 @@ namespace UnityLiquidGlass
         /// Makes a UI Toolkit element a glass button: the element's own drawing is hidden (it still
         /// takes the taps), the glass is drawn in its place and its content (text, icons, children)
         /// on top. `cornerRadius` in the panel's units, 0 = pill or circle.
-        public static void Toolkit(VisualElement element, float cornerRadius = 0f)
+        public static void Toolkit(VisualElement element, float cornerRadius = 0f) => Toolkit(element, cornerRadius, null);
+
+        /// The same, with the glass in the outline of `shape` (its alpha), stretched over the element.
+        public static void Toolkit(VisualElement element, Sprite shape) => Toolkit(element, 0f, shape);
+
+        static void Toolkit(VisualElement element, float cornerRadius, Sprite shape)
         {
             if (element == null || LiquidGlassPass.Has(element)) return;
             for (var p = element.parent; p != null; p = p.parent) if (p.ClassListContains(ButtonClass)) return;
             element.AddToClassList(ButtonClass);
-            Radii[element] = cornerRadius;
+            Shapes[element] = (cornerRadius, shape);
             if (element.panel == null) { element.RegisterCallback<AttachToPanelEvent>(OnAttached); return; }
             UIDocument owner = null;
             foreach (var doc in UnityEngine.Object.FindObjectsByType<UIDocument>(FindObjectsInactive.Exclude))
@@ -60,7 +65,7 @@ namespace UnityLiquidGlass
             // Its own drawing goes (it still takes the taps): fade a parent to fade the glass.
             // Not an opacity filter: its shader is stripped from builds that use no filters.
             element.style.opacity = 0f;
-            LiquidGlassPass.Add(new LiquidGlassPass.ToolkitItem { Element = element, Radius = cornerRadius, Copy = copy });
+            LiquidGlassPass.Add(new LiquidGlassPass.ToolkitItem { Element = element, Radius = cornerRadius, Shape = shape, Copy = copy });
             element.RegisterCallback<DetachFromPanelEvent>(OnDetached);
         }
 
@@ -69,21 +74,22 @@ namespace UnityLiquidGlass
         {
             if (element == null) return;
             LiquidGlassPass.Remove(element);
-            Radii.Remove(element);
+            Shapes.Remove(element);
             element.RemoveFromClassList(ButtonClass);
             element.style.opacity = StyleKeyword.Null;
             element.UnregisterCallback<AttachToPanelEvent>(OnAttached);
             element.UnregisterCallback<DetachFromPanelEvent>(OnDetached);
         }
 
-        static readonly Dictionary<VisualElement, float> Radii = new();
+        static readonly Dictionary<VisualElement, (float radius, Sprite shape)> Shapes = new();
 
         static void OnAttached(AttachToPanelEvent e)
         {
             if (e.target is not VisualElement element) return;
             element.UnregisterCallback<AttachToPanelEvent>(OnAttached);
             element.RemoveFromClassList(ButtonClass);
-            Toolkit(element, Radii.TryGetValue(element, out var r) ? r : 0f);
+            var (r, sh) = Shapes.TryGetValue(element, out var v) ? v : (0f, null);
+            Toolkit(element, r, sh);
         }
 
         static void OnDetached(DetachFromPanelEvent e)

@@ -1,10 +1,10 @@
 # Liquid Glass for Unity
 
-Apple's iOS 26 Liquid Glass for Unity UI, for both uGUI and UI Toolkit. Each glass button refracts what is on screen under it, in the same frame, as Apple's does.
+Apple's iOS 26 Liquid Glass for Unity UI, for both uGUI and UI Toolkit. Each glass button refracts what is on screen under it, in the same frame, as Apple's does. Buttons can be any shape.
 
 <p align="center"><img src="Documentation~/img/demo.png" width="300"></p>
 
-| Apple (SwiftUI `.glassEffect`) | This package |
+| Apple (SwiftUI `.glassEffect(.clear)`) | This package, default settings |
 | --- | --- |
 | ![Apple](Documentation~/img/apple.png) | ![Unity](Documentation~/img/ours.png) |
 
@@ -36,7 +36,10 @@ using UnityLiquidGlass;
 
 LiquidGlass.Toolkit(myButton);                     // pill or circle
 LiquidGlass.Toolkit(myCard, cornerRadius: 24);     // rounded box, panel units
+LiquidGlass.Toolkit(myBadge, badgeSprite);         // any shape: the sprite's outline
 ```
+
+**Any shape.** Set `shape` on a Liquid Glass Button (or pass a sprite to `Toolkit`), and the glass takes that sprite's outline from its alpha, stretched over the rect. Any visible pixel counts as the shape, faint fills included. The outline is turned into a distance field once per sprite, and the sprite does not need Read/Write enabled.
 
 The element's own background and border are replaced by the glass. Its text and children are drawn on top, and it still takes the taps.
 
@@ -48,7 +51,7 @@ LiquidGlass.Settings.frostRadius = 4;    // softer
 LiquidGlass.Settings.lightAngle = 45;    // light from the top right
 ```
 
-Every field has a tooltip, and the defaults are matched against Apple's glass.
+Every field has a tooltip. The defaults were tuned against Apple's glass, with colour tuned on real game art; they are close to Apple's, not identical.
 
 **Demo.** Package Manager → Liquid Glass → Samples → **Demo**. Add `LiquidGlassDemo` to an empty GameObject and press Play.
 

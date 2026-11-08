@@ -53,6 +53,10 @@ public sealed class LiquidGlassDemo : MonoBehaviour
         // A rounded card.
         var card = Glass("Card", canvas.transform, new Vector2(0, -60), new Vector2(330, 130), 28);
         Label(card.transform, font, "Liquid Glass\nfor Unity", 26);
+        // Any outline: the glass follows a sprite's alpha (here a heart, made in code).
+        var heart = Glass("Heart", canvas.transform, new Vector2(-110, 330), new Vector2(120, 110), 0);
+        heart.shape = Heart();
+        Label(heart.transform, font, "shape", 20);
 
         Toolkit(font);
     }
@@ -107,6 +111,22 @@ public sealed class LiquidGlassDemo : MonoBehaviour
         var rt = (RectTransform)go.transform;
         rt.anchoredPosition = pos; rt.sizeDelta = size;
         return go.AddComponent<T>();
+    }
+
+    static Sprite Heart()
+    {
+        const int w = 240, h = 220;
+        var tex = new Texture2D(w, h, TextureFormat.RGBA32, false);
+        var px = new Color32[w * h];
+        for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++)
+        {
+            float u = (x - w / 2f) / (w * .42f), v = (y - h * .45f) / (h * .45f);   // y up: lobes at the top
+            float f = Mathf.Pow(u * u + v * v - 1f, 3f) - u * u * v * v * v;
+            px[y * w + x] = f < 0f ? new Color32(255, 255, 255, 255) : new Color32(255, 255, 255, 0);
+        }
+        tex.SetPixels32(px); tex.Apply();
+        return Sprite.Create(tex, new Rect(0, 0, w, h), new Vector2(.5f, .5f));
     }
 
     /// Bright blobs over a fine grid with diagonals: lines show the lens, colours show the rim.

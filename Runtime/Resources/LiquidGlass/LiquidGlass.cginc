@@ -12,7 +12,7 @@
 // what it shows by about 9% (brightness), with no colour split. Light gathers where it is squeezed (a brighter
 // band), a hairline catches it on the outline, and it all scatters a little (frost). Lengths are
 // the UI's units (canvas or panel units, like iOS points); shapes are rounded boxes, radius 0 meaning the shorter half side
-// (a pill or a circle).
+// (a pill or a circle), or any outline from a sprite (radius < 0, a distance field).
 
 sampler2D _SharpTex;
 float4 _SharpTex_TexelSize;
@@ -20,8 +20,20 @@ float  _Highlight, _SourceBlur, _Saturation, _Contrast, _RimWhite, _EdgeReach, _
 float  _Liquid, _Magnify, _RimReach, _RimPower, _LensStrength, _Dispersion, _Frost, _FrostRadius, _Specular, _Tint, _Brightness;
 float4 _LightDir;
 
+// A custom shape (radius < 0): its outline as a signed distance field (ShapeField), sampled over the
+// shape's rect. r: distance in texels (negative inside), gb: the outward normal.
+sampler2D _ShapeTex;
+float4 _ShapeUV;       // shape uv → texture uv: scale xy, offset zw
+float4 _ShapeTexels;   // the rect in texels (w, h), the deepest inside distance in texels
+
 float LiquidDistance(float2 p, float2 halfSize, float radius, out float2 n)
 {
+    if (radius < 0)
+    {
+        float4 f = tex2Dlod(_ShapeTex, float4((p / (2 * halfSize) + .5) * _ShapeUV.xy + _ShapeUV.zw, 0, 0));
+        n = dot(f.gb, f.gb) > 1e-6 ? normalize(f.gb) : float2(0, 1);
+        return f.r * (halfSize.x / _ShapeTexels.x + halfSize.y / _ShapeTexels.y);   // texels → points
+    }
     float r = radius > 0 ? min(radius, min(halfSize.x, halfSize.y)) : min(halfSize.x, halfSize.y);
     float2 q = abs(p) - halfSize + r;
     float2 g = q.x > 0 && q.y > 0 ? normalize(q) : (q.x > q.y ? float2(1, 0) : float2(0, 1));
@@ -29,12 +41,19 @@ float LiquidDistance(float2 p, float2 halfSize, float radius, out float2 n)
     return length(max(q, 0)) + min(max(q.x, q.y), 0) - r;
 }
 
+// The shape's inscribed radius: how far its middle is from the outline.
+float LiquidInscribed(float2 halfSize, float radius)
+{
+    return radius < 0 ? _ShapeTexels.z * (halfSize.x / _ShapeTexels.x + halfSize.y / _ShapeTexels.y)
+                      : min(halfSize.x, halfSize.y);
+}
+
 // Where the glass at p (points from the shape's centre) takes the backdrop from, as an offset
 // in points; x is 0 on the medial axis and 1 on the outline.
 float2 LiquidShift(float2 p, float2 halfSize, float radius, out float x, out float d, out float2 n)
 {
     d = LiquidDistance(p, halfSize, radius, n);
-    float R = min(halfSize.x, halfSize.y);
+    float R = LiquidInscribed(halfSize, radius);
     x = saturate((R + d) / R);
     float a = 1 / (abs(_Magnify) < .01 ? .01 : _Magnify);   // negative: the middle shows the backdrop upside down
     float b = 1 + _RimReach - a;
@@ -86,7 +105,7 @@ half3 LiquidBackdrop(half3 blurred, float2 bguv, float2 p, float2 halfSize, floa
     // (measured: theirs vary 21% more), without making the blur any sharper.
     half3 wide = tex2Dlod(_SharpTex, float4(bguv + shift * toUv, 0, lod + 2.5)).rgb;
     soft = max(wide + (soft - wide) * (_Contrast > 0 ? _Contrast : 1), 0);
-    float R = min(halfSize.x, halfSize.y);
+    float R = LiquidInscribed(halfSize, radius);
     float a = 1 / (abs(_Magnify) < .01 ? .01 : _Magnify);
     float b = 1 + _RimReach - a;
     // Where the rim squeezes the backdrop, its light gathers: a brighter band along the outline,
@@ -105,7 +124,7 @@ half3 LiquidBackdrop(half3 blurred, float2 bguv, float2 p, float2 halfSize, floa
     rimLight = rimTint * (_Liquid * _Specular * (d < 0) * (.08 * squeeze * squeeze * (.75 + .25 * facing) + .4 * hair * facing * facing));
     // A frosted capsule catches a soft highlight: an oval near its top-left, 1.7 R in from the left end
     // (Apple's .regular capsule: 30 x 11 pt on a 56 pt tall one, about 9% brighter). Not on circles.
-    if (halfSize.x > halfSize.y * 1.5)
+    if (radius >= 0 && halfSize.x > halfSize.y * 1.5)
     {
         float2 hc = float2(-halfSize.x + 1.7 * R, halfSize.y - .375 * R);
         float he = length((p - hc) / float2(.54 * R, .2 * R));

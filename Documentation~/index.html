@@ -33,12 +33,7 @@
   .ctl .chk { grid-column: 1 / -1; display:flex; gap:16px; flex-wrap:wrap; }
   .hint { color:var(--mute); font-size:13px; margin-top:6px; }
   canvas.plot { width:100%; background:#fff; border:1px solid var(--line); border-radius:10px; display:block; }
-  .bugs { display:grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap:12px; }
-  .bug { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:12px 14px; font-size:15px; }
-  .bug b { display:block; margin-bottom:4px; }
-  .bug img { width:100%; border-radius:8px; margin-top:8px; border:1px solid var(--line); }
-  .bug .fix { color:#1b6e2e; font-size:14px; margin-top:6px; }
-  svg text { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; }
+    svg text { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; }
   @media (max-width: 680px) { .two, .lab .row { grid-template-columns: 1fr; } h1 { font-size:34px; } }
 </style>
 </head>
@@ -46,11 +41,11 @@
 <main>
 
 <h1>Liquid Glass in Unity</h1>
-<p class="lead">Apple's iOS 26 glass, rebuilt as a Unity shader and matched against Apple's own glass by measuring screenshots. Below are the steps, the mistakes, and the live shader for you to tune.</p>
+<p class="lead">Apple's iOS 26 glass, rebuilt as a Unity shader and tuned against screenshots of Apple's own glass. Below are the steps, the mistakes, and the live shader for you to tune.</p>
 
 <div class="two">
   <figure><img src="img/apple.png" alt="Apple's glass over a test grid"><figcaption>Apple, SwiftUI <code>.glassEffect(.clear)</code></figcaption></figure>
-  <figure><img src="img/ours.png" alt="Our glass over the same grid"><figcaption>Unity, this shader. The coloured dots are measurement markers.</figcaption></figure>
+  <figure><img src="img/ours.png" alt="Our glass over the same grid"><figcaption>Unity, this package with its default settings, on the same grid and shapes.</figcaption></figure>
 </div>
 
 <!-- 1 -->
@@ -86,7 +81,7 @@
 </div>
 
 <h2><small>Step 3</small>Fit it to Apple's</h2>
-<figure><img src="img/fitting.png" alt="Fitting progression"><figcaption>Seven rounds of fitting, in order; the last tile is Apple's, the target. Each round was compared with Apple's board by eye and by script: where the lines cross the rim, how thick the fold is, how bright the glass is. The final profile is g(x) = x − 1.5·x⁴, plus a thin fold right at the edge.</figcaption></figure>
+<figure><img src="img/fitting.png" alt="Fitting progression"><figcaption>Six rounds of fitting, then the package as it ships, then Apple's. The rounds were compared with Apple's board by eye and by script: where the lines cross the rim, how thick the fold is, how bright the glass is. The shipped profile is g(x) = x − 1.5·x⁴ plus a thin fold at the edge, with colour tuned on real game art. It is close, not identical: Apple's is paler and softer, and in Apple's capsule the diagonals bend into arcs where ours bend into S-curves.</figcaption></figure>
 
 <!-- 4 -->
 <h2><small>Step 4</small>Frost: blur what you refracted</h2>
@@ -124,8 +119,17 @@
 <figure><img src="img/close_cutout.png" alt="Reference on real art"><figcaption>The same check on real art: the game's frame, with Apple's own glass ✕ (via SwiftUI) placed exactly where our button sits.</figcaption></figure>
 <figure><img src="img/edge.png" alt="Close-up"><figcaption>Close-up: Apple's glass in the middle (its own ✕), ours on either side. The rims take on the colours from across the button.</figcaption></figure>
 
+<!-- 5b -->
+<h2><small>Step 6</small>Any shape</h2>
+<p>The lens only needs three things at each point: the distance to the outline, the direction to it, and how deep the shape is. A rounded box gives them by formula. For any other outline, the package builds them once from a sprite's alpha, as a signed distance field: an exact distance transform, lightly smoothed so the rim's fold doesn't ripple.</p>
+<figure><img src="img/heart.png" alt="Heart-shaped glass" style="max-width:420px"><figcaption>A heart-shaped glass button: the grid folds along its outline.</figcaption></figure>
+<pre><span class="c">// uGUI</span>
+glass.shape = mySprite;                       <span class="c">// the glass takes the sprite's outline</span>
+<span class="c">// UI Toolkit</span>
+LiquidGlass.<span class="n">Toolkit</span>(myButton, mySprite);</pre>
+
 <!-- 6 -->
-<h2><small>Step 6</small>Putting it in a real UI: the frame's last pass</h2>
+<h2><small>Step 7</small>Putting it in a real UI: the frame's last pass</h2>
 <p>Glass needs the finished picture under it, including popups, scrolling lists and video, in the same frame. Sampling the scene in advance always lagged one frame or missed something. So the glass is drawn <i>after everything else</i>:</p>
 
 <svg viewBox="0 0 820 300" width="100%" role="img" aria-label="Frame pass diagram">
@@ -168,21 +172,6 @@
 </svg>
 
 <figure><img src="img/demo_variants.png" alt="Demo variants"><figcaption>The package's demo in the iOS simulator. Left to right: <code>matte = 1</code>; a popup over half the card (its glass and its label are hidden under it); a CanvasGroup fade of 0.4; lens off.</figcaption></figure>
-
-<!-- 7 -->
-<h2><small>Bugs</small>What broke on the way</h2>
-<div class="bugs">
-  <div class="bug"><b>The frame copy came out upside down</b>On Metal the screen copy's origin is the top, so every button refracted the wrong half of the screen.<img src="img/upside_down.png" alt="Upside-down copy"><div class="fix">Flip by <code>SystemInfo.graphicsUVStartsAtTop</code>.</div></div>
-  <div class="bug"><b>The ✕ turned bold</b>The button's content was copied into a texture 104 px wide and drawn back at 98 px. The mips blurred it, and premultiplying already-straight alpha whitened its soft edge.<img src="img/bold_x.png" alt="Bold vs sharp"><div class="fix">Copy pixel-exact on the screen grid, with no mips and straight alpha.</div></div>
-  <div class="bug"><b>Glass showed the neighbouring sticker</b>In a scaled collection, <code>worldBound</code> came back 1.3× the drawn size.<div class="fix">Compute placement from layout, translate and scale down the hierarchy.</div></div>
-  <div class="bug"><b>Ghost copies in the frost</b>32 sharp taps show a thin line 32 times.<div class="fix">Each tap reads a mip about as wide as the gap between taps (Step 4).</div></div>
-  <div class="bug"><b>Double gamma</b>The glass came out washed out: colours were converted to linear once when copied and once more when drawn back.<div class="fix">Both sides use raw linear render textures. Only uGUI's gamma vertex colours are converted.</div></div>
-  <div class="bug"><b>Refraction lagged a scroll</b>A ScrollView's fling moved only every other frame at 120 Hz, so the glass decided the list had stopped and dropped to 12 fps.<div class="fix">Removed by design: the frame's last pass always sees the current frame.</div></div>
-  <div class="bug"><b>Text vanished on a fading page</b>The fade mesh copied TextMeshPro's UVs as <code>Vector2</code>, and TMP keeps glyph scale in <code>uv0.zw</code>.<div class="fix">Copy all four UV channels as <code>Vector4</code>.</div></div>
-  <div class="bug"><b>Prices missing on hint buttons</b>TMP takes its depth test from the global <code>unity_GUIZTestMode</code>, which the last canvas left at LEqual.<div class="fix">Set it to Always before drawing content.</div></div>
-  <div class="bug"><b>643 copies of one button</b>The glass was re-registered every time a page rebuilt.<div class="fix">One registration per element, removed on <code>DetachFromPanelEvent</code>.</div></div>
-  <div class="bug"><b>Fresh projects crashed</b>The button was hidden with an <code>opacity()</code> filter, and builds that use no filters strip that filter's shader.<div class="fix">Hide the button with opacity 0. A parent's fade still applies.</div></div>
-</div>
 
 <!-- 8 -->
 <h2><small>Use it</small>Two lines</h2>
