@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Liquid Glass in Unity: how it was made</title>
+<title>Liquid Glass in Unity: Apple's glass, taken apart</title>
 <style>
   :root { --ink:#1d1d1f; --mute:#6e6e73; --line:#d2d2d7; --bg:#fbfbfd; --card:#fff; --accent:#0071e3; }
   * { box-sizing: border-box; }
@@ -34,103 +34,267 @@
   .hint { color:var(--mute); font-size:13px; margin-top:6px; }
   canvas.plot { width:100%; background:#fff; border:1px solid var(--line); border-radius:10px; display:block; }
     svg text { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; }
-  @media (max-width: 680px) { .two, .lab .row { grid-template-columns: 1fr; } h1 { font-size:34px; } }
+  table { border-collapse: collapse; width:100%; font-size:15px; margin:12px 0 24px; }
+  th, td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--line); }
+  th { color:var(--mute); font-weight:600; font-size:13px; }
+  .three { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:14px; }
+  .three figure { margin:0; }
+  @media (max-width: 680px) { .two, .three, .lab .row { grid-template-columns: 1fr; } h1 { font-size:34px; } }
 </style>
 </head>
 <body>
 <main>
 
 <h1>Liquid Glass in Unity</h1>
-<p class="lead">Apple's iOS 26 glass, rebuilt as a Unity shader and tuned against screenshots of Apple's own glass. Below are the steps, the mistakes, and the live shader for you to tune.</p>
+<p class="lead">Apple's iOS 26 glass, taken apart and rebuilt as a Unity shader: measured with probes in the iOS simulator, then read out of Apple's own shaders and live layer tree. Same layers, same order, same numbers.</p>
 
 <div class="two">
-  <figure><img src="img/apple.png" alt="Apple's glass over a test grid"><figcaption>Apple, SwiftUI <code>.glassEffect(.clear)</code></figcaption></figure>
-  <figure><img src="img/ours.png" alt="Our glass over the same grid"><figcaption>Unity, this package with its default settings, on the same grid and shapes.</figcaption></figure>
+  <figure><img src="img/apple.png" alt="Apple's .clear glass over a test grid"><figcaption>Apple, SwiftUI <code>.glassEffect(.clear)</code></figcaption></figure>
+  <figure><img src="img/ours.png" alt="This package over the same grid"><figcaption>Unity, this package, default settings: the same backdrop and shapes. Over the glass the two differ by 8 of 255 on average (3 to 5 inside, the rest in the outermost points of the rim).</figcaption></figure>
+</div>
+<div class="two">
+  <figure><img src="img/apple_regular.png" alt="Apple's .regular glass"><figcaption>Apple <code>.glassEffect(.regular)</code></figcaption></figure>
+  <figure><img src="img/ours_regular.png" alt="This package with matte 1"><figcaption>Unity, <code>matte = 1</code>, with Apple's shadow around each shape.</figcaption></figure>
 </div>
 
 <!-- 1 -->
-<h2><small>Step 1</small>Get the real thing on a test grid</h2>
-<p>To copy Apple's glass we first had to see it. We rendered Apple's own glass over a grid whose distortion we could measure.</p>
-<pre><span class="c">// Apple's glass over a 220 × 140 pt test grid: lines every 10 pt, red diagonals every 25 pt.</span>
-<span class="k">ZStack</span>(alignment: .topLeading) {
-    <span class="n">Grid</span>().frame(width: <span class="v">220</span>, height: <span class="v">140</span>)
-    Color.clear.frame(width: <span class="v">56</span>, height: <span class="v">56</span>).<span class="k">glassEffect</span>(.clear, in: Circle()).offset(x: <span class="v">40</span>, y: <span class="v">30</span>)
-    Color.clear.frame(width: <span class="v">180</span>, height: <span class="v">56</span>).<span class="k">glassEffect</span>(.clear, in: Capsule()).offset(x: <span class="v">20</span>, y: <span class="v">70</span>)
-}</pre>
-<figure><img src="img/apple_board.png" alt="Apple's glass board"><figcaption>The reference. Inside the capsule straight lines bend into “S” shapes, and the circle shows a four-leaf knot. That is not magnification.</figcaption></figure>
+<h2><small>Mistake</small>Fitting a curve to screenshots</h2>
+<p>The first version of this package was tuned by eye and by script against screenshots of Apple's glass: a remap from the shape's middle line to its outline, scaled to the shape, plus saturation, brightness and a white tint picked on game art. It came close on the one board it was fitted to and drifted everywhere else. Circles of another size bent the grid differently, and colours came out more orange than Apple's. A good fit is not the same model, so the second version measures each layer on its own.</p>
 
 <!-- 2 -->
-<h2><small>Mistake 1</small>“It's a magnifying lens”</h2>
-<figure><img src="img/early.png" alt="Early attempts"><figcaption><span class="tag bad">wrong</span> The first versions were a bulging magnifier with a dark crescent of “thickness”. They were smooth and pretty, and nothing like the reference.</figcaption></figure>
+<h2><small>Step 1</small>Probe one layer at a time</h2>
+<p>Each probe is a tiny SwiftUI app in the iOS simulator, built so that only one property of the glass can change the picture:</p>
+<div class="three">
+  <figure><img src="img/probe_flat.png" alt="Glass over flat colours"><figcaption><b>Flat colours</b> show the tone alone: there is nothing to refract or blur.</figcaption></figure>
+  <figure><img src="img/probe_ramp.png" alt="Glass over position-coded ramps"><figcaption><b>Position-coded ramps</b> (red = x, green = y) show where each pixel samples the backdrop. A blur leaves a linear ramp unchanged.</figcaption></figure>
+  <figure><img src="img/probe_edge.png" alt="Glass over an edge and a line"><figcaption><b>An edge and a 1 pt line</b> under the flat middle give the blur's kernel.</figcaption></figure>
+</div>
+<p>What they showed, for <code>.clear</code>:</p>
+<table>
+  <tr><th>Layer</th><th>Measured</th></tr>
+  <tr><td>Tone</td><td><code>0.075 + 1.04 × colour</code> per sRGB channel, no saturation change. A 1-pixel black and white stripe pattern comes out 0.596: Apple averages sRGB-encoded values, not linear light.</td></tr>
+  <tr><td>Blur</td><td>A plain Gaussian, σ 1.65 pt, before the refraction. Blurring after refracting fits Apple's board half as well.</td></tr>
+  <tr><td>Refraction</td><td>Only along the normal, none in the middle, and a function of the depth in <b>points</b> from the outline, not of the shape's size: circles of 56 and 112 pt shift by the same amount at the same depth.</td></tr>
+  <tr><td>Rim</td><td>A hairline about 1 pt wide, brightest at 135° and 315°, gone at 45° and 225°. Its colour depends on what is under it: it glows over dark blue and vanishes over bright green.</td></tr>
+</table>
 
 <!-- 3 -->
-<h2><small>Step 2</small>The glass is a remap</h2>
-<p>Each point of the glass shows the backdrop from somewhere else, and that place depends only on how far the point is from the shape's middle line. Let <i>x</i> be that distance, scaled to run from 0 on the middle line to 1 on the outline. Near the rim the sampled position swings past the middle to the far side, so the rim shows what lies <i>across</i> the button, and straight lines fold into arcs.</p>
-<pre id="formula"></pre>
+<h2><small>Step 2</small>Open the box</h2>
+<p>Liquid Glass is drawn by Core Animation. The iOS runtime that ships with Xcode's simulator holds its shaders in <code>QuartzCore.framework/default.metallib</code>: 168 modules of LLVM bitcode, which a stock bitcode reader opens. The glass is a <code>CAFilter</code> called <code>glassBackground</code> on a <code>CABackdropLayer</code>, with a <code>CASDFKeyFillHighlightEffect</code> and a <code>vibrantColorMatrix</code> filter on a layer above it for the rim. Its uniforms name every part:</p>
+<pre><span class="c">// GlassBackgroundUniforms (QuartzCore, iOS 26.5)</span>
+displacement_mat  inner_refraction_amount  inner_refraction_inv_height  outer_refraction_amount
+blur_radius  blur_alpha0..3  blur_dist0..3        <span class="c">// a blur that changes with the distance to the edge</span>
+face_cm0..2                                      <span class="c">// the glass's colour matrix</span>
+bleed_cm0..2  edge_bleed_amount  bleed_darken    <span class="c">// a second, much blurrier sample, mixed by luma</span>
+shadow_cm0..2  shadow_amount  shadow_offset  shadow_opacity</pre>
+<p>The refraction is three lines of the shader, here as GLSL:</p>
+<pre><span class="k">float</span> t = saturate(-d * inner_refraction_inv_height);    <span class="c">// d: signed distance, negative inside</span>
+<span class="k">float</span> s = sqrt(t * (<span class="v">2.</span> - t));                          <span class="c">// sqrt(1 - (1 - t)²): a quarter circle</span>
+uv += (inner_refraction_amount * (<span class="v">1.</span> - s)) * (displacement_mat * normal);</pre>
+<p>A flat slab whose edge is a quarter circle of fixed height, so the bezel's width is set in points. The numbers come from the running app: walk the layer tree and read each filter's inputs by key.</p>
+<pre><span class="c">// glassBackground on a 112 pt .clear circle</span>
+inputInnerRefractionAmount = <span class="v">-60</span>    inputInnerRefractionHeight = <span class="v">20</span>
+inputBlurRadius = <span class="v">1</span>                  inputBlurOpacity0..1 = <span class="v">1</span>, <span class="v">0.5</span>
+inputFaceColorMatrixBlack = <span class="v">0.075</span>   <span class="c">// the measured lift, exactly</span>
+<span class="c">// across sizes S (the shorter side): amount = -min(S, 60), height = min(0.36 S, 20)</span></pre>
+<figure><svg viewBox="0 0 760 380" width="100%" role="img" aria-label="Measured bezel displacement against Apple's formula">
+<line x1="56" x2="740" y1="20.0" y2="20.0" stroke="#e5e5ea"/><text x="48" y="24.0" text-anchor="end" font-size="12" fill="#6e6e73">0</text>
+<line x1="56" x2="740" y1="98.5" y2="98.5" stroke="#e5e5ea"/><text x="48" y="102.5" text-anchor="end" font-size="12" fill="#6e6e73">-10</text>
+<line x1="56" x2="740" y1="177.0" y2="177.0" stroke="#e5e5ea"/><text x="48" y="181.0" text-anchor="end" font-size="12" fill="#6e6e73">-20</text>
+<line x1="56" x2="740" y1="255.5" y2="255.5" stroke="#e5e5ea"/><text x="48" y="259.5" text-anchor="end" font-size="12" fill="#6e6e73">-30</text>
+<line x1="56" x2="740" y1="334.0" y2="334.0" stroke="#e5e5ea"/><text x="48" y="338.0" text-anchor="end" font-size="12" fill="#6e6e73">-40</text>
+<text x="56.0" y="352" text-anchor="middle" font-size="12" fill="#6e6e73">0</text>
+<text x="170.0" y="352" text-anchor="middle" font-size="12" fill="#6e6e73">5</text>
+<text x="284.0" y="352" text-anchor="middle" font-size="12" fill="#6e6e73">10</text>
+<text x="398.0" y="352" text-anchor="middle" font-size="12" fill="#6e6e73">15</text>
+<text x="512.0" y="352" text-anchor="middle" font-size="12" fill="#6e6e73">20</text>
+<text x="626.0" y="352" text-anchor="middle" font-size="12" fill="#6e6e73">25</text>
+<text x="740.0" y="352" text-anchor="middle" font-size="12" fill="#6e6e73">30</text>
+<text x="398.0" y="372" text-anchor="middle" font-size="13" fill="#6e6e73">depth inside the outline, pt</text>
+<text x="14" y="177.0" text-anchor="middle" font-size="13" fill="#6e6e73" transform="rotate(-90 14 177.0)">shift, pt</text>
+<path d="M56.0,255.5 L61.7,205.1 L67.4,184.7 L73.1,169.3 L78.8,156.5 L84.5,145.5 L90.2,135.8 L95.9,127.0 L101.6,119.0 L107.3,111.6 L113.0,104.8 L118.7,98.5 L124.4,92.6 L130.1,87.1 L135.8,81.9 L141.5,77.1 L147.2,72.5 L152.9,68.3 L158.6,64.2 L164.3,60.4 L170.0,56.8 L175.7,53.5 L181.4,50.3 L187.1,47.3 L192.8,44.5 L198.5,41.9 L204.2,39.5 L209.9,37.2 L215.6,35.1 L221.3,33.1 L227.0,31.3 L232.7,29.6 L238.4,28.1 L244.1,26.7 L249.8,25.4 L255.5,24.3 L261.2,23.3 L266.9,22.4 L272.6,21.7 L278.3,21.1 L284.0,20.6 L289.7,20.3 L295.4,20.1 L301.1,20.0 L306.8,20.0 L312.5,20.0 L318.2,20.0 L323.9,20.0 L329.6,20.0 L335.3,20.0 L341.0,20.0 L346.7,20.0 L352.4,20.0 L358.1,20.0 L363.8,20.0 L369.5,20.0 L375.2,20.0 L380.9,20.0 L386.6,20.0 L392.3,20.0 L398.0,20.0 L403.7,20.0 L409.4,20.0 L415.1,20.0 L420.8,20.0 L426.5,20.0 L432.2,20.0 L437.9,20.0 L443.6,20.0 L449.3,20.0 L455.0,20.0 L460.7,20.0 L466.4,20.0 L472.1,20.0 L477.8,20.0 L483.5,20.0 L489.2,20.0 L494.9,20.0 L500.6,20.0 L506.3,20.0 L512.0,20.0 L517.7,20.0 L523.4,20.0 L529.1,20.0 L534.8,20.0 L540.5,20.0 L546.2,20.0 L551.9,20.0 L557.6,20.0 L563.3,20.0 L569.0,20.0 L574.7,20.0 L580.4,20.0 L586.1,20.0 L591.8,20.0 L597.5,20.0 L603.2,20.0 L608.9,20.0 L614.6,20.0 L620.3,20.0 L626.0,20.0 L631.7,20.0 L637.4,20.0 L643.1,20.0 L648.8,20.0 L654.5,20.0 L660.2,20.0 L665.9,20.0 L671.6,20.0 L677.3,20.0 L683.0,20.0 L688.7,20.0 L694.4,20.0 L700.1,20.0 L705.8,20.0 L711.5,20.0 L717.2,20.0 L722.9,20.0 L728.6,20.0 L734.3,20.0 L740.0,20.0" fill="none" stroke="#ff9500" stroke-width="2" opacity=".55"/>
+<circle cx="124.4" cy="93.4" r="3" fill="#ff9500"/>
+<circle cx="147.2" cy="73.1" r="3" fill="#ff9500"/>
+<circle cx="170.0" cy="56.7" r="3" fill="#ff9500"/>
+<circle cx="192.8" cy="45.1" r="3" fill="#ff9500"/>
+<circle cx="215.6" cy="35.1" r="3" fill="#ff9500"/>
+<circle cx="238.4" cy="28.3" r="3" fill="#ff9500"/>
+<circle cx="261.2" cy="23.5" r="3" fill="#ff9500"/>
+<circle cx="284.0" cy="20.4" r="3" fill="#ff9500"/>
+<circle cx="306.8" cy="20.9" r="3" fill="#ff9500"/>
+<circle cx="329.6" cy="20.6" r="3" fill="#ff9500"/>
+<circle cx="352.4" cy="20.1" r="3" fill="#ff9500"/>
+<circle cx="375.2" cy="18.1" r="3" fill="#ff9500"/>
+<circle cx="560" cy="28" r="4" fill="#ff9500"/><text x="570" y="32" font-size="13">circle 30 pt</text>
+<path d="M56.0,334.0 L61.7,275.7 L67.4,252.0 L73.1,234.0 L78.8,219.0 L84.5,206.0 L90.2,194.5 L95.9,184.0 L101.6,174.4 L107.3,165.5 L113.0,157.2 L118.7,149.4 L124.4,142.2 L130.1,135.3 L135.8,128.8 L141.5,122.7 L147.2,116.8 L152.9,111.3 L158.6,106.0 L164.3,100.9 L170.0,96.1 L175.7,91.5 L181.4,87.2 L187.1,83.0 L192.8,79.0 L198.5,75.1 L204.2,71.5 L209.9,68.0 L215.6,64.6 L221.3,61.4 L227.0,58.4 L232.7,55.5 L238.4,52.7 L244.1,50.1 L249.8,47.6 L255.5,45.2 L261.2,42.9 L266.9,40.8 L272.6,38.7 L278.3,36.8 L284.0,35.0 L289.7,33.3 L295.4,31.7 L301.1,30.3 L306.8,28.9 L312.5,27.6 L318.2,26.4 L323.9,25.4 L329.6,24.4 L335.3,23.5 L341.0,22.7 L346.7,22.1 L352.4,21.5 L358.1,21.0 L363.8,20.6 L369.5,20.3 L375.2,20.1 L380.9,20.0 L386.6,20.0 L392.3,20.0 L398.0,20.0 L403.7,20.0 L409.4,20.0 L415.1,20.0 L420.8,20.0 L426.5,20.0 L432.2,20.0 L437.9,20.0 L443.6,20.0 L449.3,20.0 L455.0,20.0 L460.7,20.0 L466.4,20.0 L472.1,20.0 L477.8,20.0 L483.5,20.0 L489.2,20.0 L494.9,20.0 L500.6,20.0 L506.3,20.0 L512.0,20.0 L517.7,20.0 L523.4,20.0 L529.1,20.0 L534.8,20.0 L540.5,20.0 L546.2,20.0 L551.9,20.0 L557.6,20.0 L563.3,20.0 L569.0,20.0 L574.7,20.0 L580.4,20.0 L586.1,20.0 L591.8,20.0 L597.5,20.0 L603.2,20.0 L608.9,20.0 L614.6,20.0 L620.3,20.0 L626.0,20.0 L631.7,20.0 L637.4,20.0 L643.1,20.0 L648.8,20.0 L654.5,20.0 L660.2,20.0 L665.9,20.0 L671.6,20.0 L677.3,20.0 L683.0,20.0 L688.7,20.0 L694.4,20.0 L700.1,20.0 L705.8,20.0 L711.5,20.0 L717.2,20.0 L722.9,20.0 L728.6,20.0 L734.3,20.0 L740.0,20.0" fill="none" stroke="#af52de" stroke-width="2" opacity=".55"/>
+<circle cx="124.4" cy="142.1" r="3" fill="#af52de"/>
+<circle cx="147.2" cy="119.4" r="3" fill="#af52de"/>
+<circle cx="170.0" cy="97.3" r="3" fill="#af52de"/>
+<circle cx="192.8" cy="82.1" r="3" fill="#af52de"/>
+<circle cx="215.6" cy="66.8" r="3" fill="#af52de"/>
+<circle cx="238.4" cy="53.7" r="3" fill="#af52de"/>
+<circle cx="261.2" cy="43.7" r="3" fill="#af52de"/>
+<circle cx="284.0" cy="35.9" r="3" fill="#af52de"/>
+<circle cx="306.8" cy="30.1" r="3" fill="#af52de"/>
+<circle cx="329.6" cy="25.2" r="3" fill="#af52de"/>
+<circle cx="352.4" cy="24.0" r="3" fill="#af52de"/>
+<circle cx="375.2" cy="21.4" r="3" fill="#af52de"/>
+<circle cx="398.0" cy="18.8" r="3" fill="#af52de"/>
+<circle cx="420.8" cy="21.0" r="3" fill="#af52de"/>
+<circle cx="443.6" cy="22.2" r="3" fill="#af52de"/>
+<circle cx="466.4" cy="20.1" r="3" fill="#af52de"/>
+<circle cx="489.2" cy="19.1" r="3" fill="#af52de"/>
+<circle cx="512.0" cy="19.2" r="3" fill="#af52de"/>
+<circle cx="560" cy="48" r="4" fill="#af52de"/><text x="570" y="52" font-size="13">capsule 40 pt tall</text>
+<path d="M56.0,459.6 L61.7,390.3 L67.4,361.9 L73.1,340.3 L78.8,322.3 L84.5,306.6 L90.2,292.6 L95.9,279.8 L101.6,268.0 L107.3,257.0 L113.0,246.8 L118.7,237.1 L124.4,228.0 L130.1,219.4 L135.8,211.2 L141.5,203.3 L147.2,195.8 L152.9,188.7 L158.6,181.8 L164.3,175.2 L170.0,168.8 L175.7,162.7 L181.4,156.8 L187.1,151.1 L192.8,145.7 L198.5,140.4 L204.2,135.3 L209.9,130.3 L215.6,125.5 L221.3,120.9 L227.0,116.4 L232.7,112.1 L238.4,107.9 L244.1,103.9 L249.8,99.9 L255.5,96.1 L261.2,92.5 L266.9,88.9 L272.6,85.5 L278.3,82.1 L284.0,78.9 L289.7,75.8 L295.4,72.8 L301.1,69.8 L306.8,67.0 L312.5,64.3 L318.2,61.7 L323.9,59.1 L329.6,56.7 L335.3,54.3 L341.0,52.1 L346.7,49.9 L352.4,47.8 L358.1,45.8 L363.8,43.9 L369.5,42.0 L375.2,40.2 L380.9,38.6 L386.6,36.9 L392.3,35.4 L398.0,34.0 L403.7,32.6 L409.4,31.3 L415.1,30.0 L420.8,28.9 L426.5,27.8 L432.2,26.8 L437.9,25.8 L443.6,25.0 L449.3,24.2 L455.0,23.4 L460.7,22.8 L466.4,22.2 L472.1,21.7 L477.8,21.2 L483.5,20.9 L489.2,20.5 L494.9,20.3 L500.6,20.1 L506.3,20.0 L512.0,20.0 L517.7,20.0 L523.4,20.0 L529.1,20.0 L534.8,20.0 L540.5,20.0 L546.2,20.0 L551.9,20.0 L557.6,20.0 L563.3,20.0 L569.0,20.0 L574.7,20.0 L580.4,20.0 L586.1,20.0 L591.8,20.0 L597.5,20.0 L603.2,20.0 L608.9,20.0 L614.6,20.0 L620.3,20.0 L626.0,20.0 L631.7,20.0 L637.4,20.0 L643.1,20.0 L648.8,20.0 L654.5,20.0 L660.2,20.0 L665.9,20.0 L671.6,20.0 L677.3,20.0 L683.0,20.0 L688.7,20.0 L694.4,20.0 L700.1,20.0 L705.8,20.0 L711.5,20.0 L717.2,20.0 L722.9,20.0 L728.6,20.0 L734.3,20.0 L740.0,20.0" fill="none" stroke="#0071e3" stroke-width="2" opacity=".55"/>
+<circle cx="124.4" cy="229.2" r="3" fill="#0071e3"/>
+<circle cx="147.2" cy="195.3" r="3" fill="#0071e3"/>
+<circle cx="170.0" cy="169.2" r="3" fill="#0071e3"/>
+<circle cx="192.8" cy="145.7" r="3" fill="#0071e3"/>
+<circle cx="215.6" cy="126.7" r="3" fill="#0071e3"/>
+<circle cx="238.4" cy="107.3" r="3" fill="#0071e3"/>
+<circle cx="261.2" cy="92.9" r="3" fill="#0071e3"/>
+<circle cx="284.0" cy="80.2" r="3" fill="#0071e3"/>
+<circle cx="306.8" cy="68.0" r="3" fill="#0071e3"/>
+<circle cx="329.6" cy="56.9" r="3" fill="#0071e3"/>
+<circle cx="352.4" cy="48.0" r="3" fill="#0071e3"/>
+<circle cx="375.2" cy="40.3" r="3" fill="#0071e3"/>
+<circle cx="398.0" cy="34.3" r="3" fill="#0071e3"/>
+<circle cx="420.8" cy="29.5" r="3" fill="#0071e3"/>
+<circle cx="443.6" cy="25.8" r="3" fill="#0071e3"/>
+<circle cx="466.4" cy="23.0" r="3" fill="#0071e3"/>
+<circle cx="489.2" cy="20.7" r="3" fill="#0071e3"/>
+<circle cx="512.0" cy="20.8" r="3" fill="#0071e3"/>
+<circle cx="534.8" cy="21.2" r="3" fill="#0071e3"/>
+<circle cx="557.6" cy="19.9" r="3" fill="#0071e3"/>
+<circle cx="580.4" cy="20.2" r="3" fill="#0071e3"/>
+<circle cx="603.2" cy="20.9" r="3" fill="#0071e3"/>
+<circle cx="626.0" cy="20.8" r="3" fill="#0071e3"/>
+<circle cx="648.8" cy="19.9" r="3" fill="#0071e3"/>
+<circle cx="671.6" cy="18.5" r="3" fill="#0071e3"/>
+<circle cx="560" cy="68" r="4" fill="#0071e3"/><text x="570" y="72" font-size="13">circle 56 pt</text>
+<path d="M56.0,459.6 L61.7,390.3 L67.4,361.9 L73.1,340.3 L78.8,322.3 L84.5,306.6 L90.2,292.6 L95.9,279.8 L101.6,268.0 L107.3,257.0 L113.0,246.8 L118.7,237.1 L124.4,228.0 L130.1,219.4 L135.8,211.2 L141.5,203.3 L147.2,195.8 L152.9,188.7 L158.6,181.8 L164.3,175.2 L170.0,168.8 L175.7,162.7 L181.4,156.8 L187.1,151.1 L192.8,145.7 L198.5,140.4 L204.2,135.3 L209.9,130.3 L215.6,125.5 L221.3,120.9 L227.0,116.4 L232.7,112.1 L238.4,107.9 L244.1,103.9 L249.8,99.9 L255.5,96.1 L261.2,92.5 L266.9,88.9 L272.6,85.5 L278.3,82.1 L284.0,78.9 L289.7,75.8 L295.4,72.8 L301.1,69.8 L306.8,67.0 L312.5,64.3 L318.2,61.7 L323.9,59.1 L329.6,56.7 L335.3,54.3 L341.0,52.1 L346.7,49.9 L352.4,47.8 L358.1,45.8 L363.8,43.9 L369.5,42.0 L375.2,40.2 L380.9,38.6 L386.6,36.9 L392.3,35.4 L398.0,34.0 L403.7,32.6 L409.4,31.3 L415.1,30.0 L420.8,28.9 L426.5,27.8 L432.2,26.8 L437.9,25.8 L443.6,25.0 L449.3,24.2 L455.0,23.4 L460.7,22.8 L466.4,22.2 L472.1,21.7 L477.8,21.2 L483.5,20.9 L489.2,20.5 L494.9,20.3 L500.6,20.1 L506.3,20.0 L512.0,20.0 L517.7,20.0 L523.4,20.0 L529.1,20.0 L534.8,20.0 L540.5,20.0 L546.2,20.0 L551.9,20.0 L557.6,20.0 L563.3,20.0 L569.0,20.0 L574.7,20.0 L580.4,20.0 L586.1,20.0 L591.8,20.0 L597.5,20.0 L603.2,20.0 L608.9,20.0 L614.6,20.0 L620.3,20.0 L626.0,20.0 L631.7,20.0 L637.4,20.0 L643.1,20.0 L648.8,20.0 L654.5,20.0 L660.2,20.0 L665.9,20.0 L671.6,20.0 L677.3,20.0 L683.0,20.0 L688.7,20.0 L694.4,20.0 L700.1,20.0 L705.8,20.0 L711.5,20.0 L717.2,20.0 L722.9,20.0 L728.6,20.0 L734.3,20.0 L740.0,20.0" fill="none" stroke="#34c759" stroke-width="2" opacity=".55"/>
+<circle cx="124.4" cy="234.5" r="3" fill="#34c759"/>
+<circle cx="147.2" cy="197.0" r="3" fill="#34c759"/>
+<circle cx="170.0" cy="174.4" r="3" fill="#34c759"/>
+<circle cx="192.8" cy="148.5" r="3" fill="#34c759"/>
+<circle cx="215.6" cy="129.1" r="3" fill="#34c759"/>
+<circle cx="238.4" cy="109.6" r="3" fill="#34c759"/>
+<circle cx="261.2" cy="94.3" r="3" fill="#34c759"/>
+<circle cx="284.0" cy="83.3" r="3" fill="#34c759"/>
+<circle cx="306.8" cy="70.7" r="3" fill="#34c759"/>
+<circle cx="329.6" cy="57.6" r="3" fill="#34c759"/>
+<circle cx="352.4" cy="48.1" r="3" fill="#34c759"/>
+<circle cx="375.2" cy="40.3" r="3" fill="#34c759"/>
+<circle cx="398.0" cy="34.1" r="3" fill="#34c759"/>
+<circle cx="420.8" cy="31.5" r="3" fill="#34c759"/>
+<circle cx="443.6" cy="27.2" r="3" fill="#34c759"/>
+<circle cx="466.4" cy="23.7" r="3" fill="#34c759"/>
+<circle cx="489.2" cy="20.6" r="3" fill="#34c759"/>
+<circle cx="512.0" cy="20.2" r="3" fill="#34c759"/>
+<circle cx="534.8" cy="22.3" r="3" fill="#34c759"/>
+<circle cx="557.6" cy="21.4" r="3" fill="#34c759"/>
+<circle cx="580.4" cy="18.8" r="3" fill="#34c759"/>
+<circle cx="603.2" cy="21.0" r="3" fill="#34c759"/>
+<circle cx="626.0" cy="22.2" r="3" fill="#34c759"/>
+<circle cx="648.8" cy="20.1" r="3" fill="#34c759"/>
+<circle cx="671.6" cy="19.1" r="3" fill="#34c759"/>
+<circle cx="694.4" cy="19.2" r="3" fill="#34c759"/>
+<circle cx="560" cy="88" r="4" fill="#34c759"/><text x="570" y="92" font-size="13">capsule 56 pt tall</text>
+<path d="M56.0,491.0 L61.7,416.8 L67.4,386.3 L73.1,363.2 L78.8,343.9 L84.5,327.1 L90.2,312.0 L95.9,298.3 L101.6,285.7 L107.3,274.0 L113.0,263.0 L118.7,252.6 L124.4,242.9 L130.1,233.6 L135.8,224.8 L141.5,216.4 L147.2,208.4 L152.9,200.7 L158.6,193.3 L164.3,186.3 L170.0,179.5 L175.7,172.9 L181.4,166.6 L187.1,160.5 L192.8,154.6 L198.5,149.0 L204.2,143.5 L209.9,138.2 L215.6,133.1 L221.3,128.1 L227.0,123.3 L232.7,118.7 L238.4,114.2 L244.1,109.9 L249.8,105.6 L255.5,101.6 L261.2,97.6 L266.9,93.8 L272.6,90.1 L278.3,86.6 L284.0,83.1 L289.7,79.8 L295.4,76.5 L301.1,73.4 L306.8,70.4 L312.5,67.5 L318.2,64.7 L323.9,61.9 L329.6,59.3 L335.3,56.8 L341.0,54.4 L346.7,52.0 L352.4,49.8 L358.1,47.6 L363.8,45.6 L369.5,43.6 L375.2,41.7 L380.9,39.9 L386.6,38.2 L392.3,36.5 L398.0,35.0 L403.7,33.5 L409.4,32.1 L415.1,30.8 L420.8,29.5 L426.5,28.4 L432.2,27.3 L437.9,26.3 L443.6,25.3 L449.3,24.5 L455.0,23.7 L460.7,23.0 L466.4,22.4 L472.1,21.8 L477.8,21.3 L483.5,20.9 L489.2,20.6 L494.9,20.3 L500.6,20.1 L506.3,20.0 L512.0,20.0 L517.7,20.0 L523.4,20.0 L529.1,20.0 L534.8,20.0 L540.5,20.0 L546.2,20.0 L551.9,20.0 L557.6,20.0 L563.3,20.0 L569.0,20.0 L574.7,20.0 L580.4,20.0 L586.1,20.0 L591.8,20.0 L597.5,20.0 L603.2,20.0 L608.9,20.0 L614.6,20.0 L620.3,20.0 L626.0,20.0 L631.7,20.0 L637.4,20.0 L643.1,20.0 L648.8,20.0 L654.5,20.0 L660.2,20.0 L665.9,20.0 L671.6,20.0 L677.3,20.0 L683.0,20.0 L688.7,20.0 L694.4,20.0 L700.1,20.0 L705.8,20.0 L711.5,20.0 L717.2,20.0 L722.9,20.0 L728.6,20.0 L734.3,20.0 L740.0,20.0" fill="none" stroke="#ff3b30" stroke-width="2" opacity=".55"/>
+<circle cx="124.4" cy="245.2" r="3" fill="#ff3b30"/>
+<circle cx="147.2" cy="210.8" r="3" fill="#ff3b30"/>
+<circle cx="170.0" cy="182.5" r="3" fill="#ff3b30"/>
+<circle cx="192.8" cy="157.7" r="3" fill="#ff3b30"/>
+<circle cx="215.6" cy="136.0" r="3" fill="#ff3b30"/>
+<circle cx="238.4" cy="117.2" r="3" fill="#ff3b30"/>
+<circle cx="261.2" cy="100.9" r="3" fill="#ff3b30"/>
+<circle cx="284.0" cy="86.2" r="3" fill="#ff3b30"/>
+<circle cx="306.8" cy="73.8" r="3" fill="#ff3b30"/>
+<circle cx="329.6" cy="62.8" r="3" fill="#ff3b30"/>
+<circle cx="352.4" cy="53.1" r="3" fill="#ff3b30"/>
+<circle cx="375.2" cy="45.0" r="3" fill="#ff3b30"/>
+<circle cx="398.0" cy="38.3" r="3" fill="#ff3b30"/>
+<circle cx="420.8" cy="32.8" r="3" fill="#ff3b30"/>
+<circle cx="443.6" cy="28.7" r="3" fill="#ff3b30"/>
+<circle cx="466.4" cy="25.8" r="3" fill="#ff3b30"/>
+<circle cx="489.2" cy="23.6" r="3" fill="#ff3b30"/>
+<circle cx="512.0" cy="22.7" r="3" fill="#ff3b30"/>
+<circle cx="534.8" cy="22.4" r="3" fill="#ff3b30"/>
+<circle cx="557.6" cy="22.9" r="3" fill="#ff3b30"/>
+<circle cx="580.4" cy="23.0" r="3" fill="#ff3b30"/>
+<circle cx="603.2" cy="22.6" r="3" fill="#ff3b30"/>
+<circle cx="626.0" cy="22.6" r="3" fill="#ff3b30"/>
+<circle cx="648.8" cy="22.7" r="3" fill="#ff3b30"/>
+<circle cx="671.6" cy="22.4" r="3" fill="#ff3b30"/>
+<circle cx="694.4" cy="22.2" r="3" fill="#ff3b30"/>
+<circle cx="717.2" cy="22.2" r="3" fill="#ff3b30"/>
+<circle cx="740.0" cy="22.5" r="3" fill="#ff3b30"/>
+<circle cx="560" cy="108" r="4" fill="#ff3b30"/><text x="570" y="112" font-size="13">circle 112 pt</text>
+<text x="560" y="136" font-size="12" fill="#6e6e73">dots: measured · lines: Apple's formula</text>
+</svg><figcaption>The shift at each depth, measured on the ramps for five shapes (dots), against Apple's formula with the amounts read from the filter (lines). Shapes of 56 pt and more share one curve; smaller ones get a proportionally narrower and shallower bezel.</figcaption></figure>
+<p>The rim's colour is a fixed matrix applied to what lies under it: near white over dark and neutral colours, and over a bright green its red and blue go negative, so the line disappears.</p>
+<pre><span class="c">// vibrantColorMatrix on the highlight layer</span>
+R' =  <span class="v">1.20</span>·r − <span class="v">1.00</span>·g − <span class="v">0.10</span>·b + <span class="v">0.9</span>
+G' = −<span class="v">0.30</span>·r + <span class="v">0.50</span>·g − <span class="v">0.10</span>·b + <span class="v">0.9</span>
+B' = −<span class="v">0.30</span>·r − <span class="v">1.00</span>·g + <span class="v">1.40</span>·b + <span class="v">0.9</span>
+<span class="c">// CASDFKeyFillHighlightEffect: key light at -45°, fill light at 135°, each spread π/2, amount 0.5</span></pre>
 
+<!-- 4 -->
+<h2><small>Step 3</small>The same layers, in the same order</h2>
+<ol>
+  <li><b>Blur</b> the backdrop: Gaussian, σ 1.65 pt, half as strong a point inside the outline.</li>
+  <li><b>Refract</b> it by the quarter-circle bezel: 20 pt wide, at most 0.36 of a small shape's shorter side.</li>
+  <li><b>Tone</b>: <code>0.075 + 1.04 × colour</code> on sRGB values.</li>
+  <li><b>Hairline</b>: two opposite lights, in the vibrant colour of what lies under it.</li>
+</ol>
+<p>Drag the glass. The plot shows the bezel's shift for the current size.</p>
 <div class="lab" id="lab1">
   <div class="row">
     <canvas class="gl" width="900" height="560"></canvas>
     <div>
       <canvas class="plot" width="520" height="360"></canvas>
-      <div class="hint">Where the glass samples (y) at each distance from the middle (x). The dashed line is flat glass.</div>
+      <div class="hint">How far in the glass samples (y, pt) at each depth inside its outline (x, pt).</div>
     </div>
   </div>
-  <div class="ctl" data-params="magnify rimReach rimPower edgeReach lens" data-preset="profile"></div>
-  <div class="hint">Drag the glass. Frost is off here, so you see the bare remap.</div>
+  <div class="ctl" data-params="size bezelWidth bezelDepth frostRadius lift gain specular" data-checks="pill blur tone" data-preset="clear"></div>
 </div>
-
-<h2><small>Step 3</small>Fit it to Apple's</h2>
-<figure><img src="img/fitting.png" alt="Fitting progression"><figcaption>Six rounds of fitting, then the package as it ships, then Apple's. The rounds were compared with Apple's board by eye and by script: where the lines cross the rim, how thick the fold is, how bright the glass is. The shipped profile is g(x) = x − 1.5·x⁴ plus a thin fold at the edge, with colour tuned on real game art. It is close, not identical: Apple's is paler and softer, and in Apple's capsule the diagonals bend into arcs where ours bend into S-curves.</figcaption></figure>
-
-<!-- 4 -->
-<h2><small>Step 4</small>Frost: blur what you refracted</h2>
-<p>Apple's glass is slightly milky. Blurring the backdrop first and then refracting it looked wrong: the squeezed rim broke into thin, sharp copies of each line. The fix is to blur the <i>refracted</i> image. Each of 32 taps on a golden-angle spiral is refracted where it lands.</p>
-<p>A tap that reads the full-resolution image still produces ghost copies. Turn off <b>mip per tap</b> below to see them. Reading a mip level about as wide as the gap between taps smears a thin line into one soft band.</p>
-
-<div class="lab" id="lab2">
-  <canvas class="gl" width="900" height="560"></canvas>
-  <div class="ctl" data-params="frost frostRadius sourceBlur contrast" data-checks="mipTaps" data-preset="frost"></div>
-</div>
-
-<pre><span class="k">for</span> (<span class="k">int</span> i = <span class="v">0</span>; i &lt; <span class="v">32</span>; i++) {
-    <span class="k">float</span> an = i * <span class="v">2.39996</span>;                          <span class="c">// golden angle</span>
-    <span class="k">float</span> rr = sqrt((i + <span class="v">.5</span>) / <span class="v">32</span>);
-    <span class="k">float2</span> o = float2(cos(an), sin(an)) * rr * _FrostRadius;
-    <span class="k">float2</span> ts = <span class="n">LiquidShift</span>(p + o, ...);              <span class="c">// refract each tap where it lands</span>
-    <span class="k">float</span> w = exp(<span class="v">-4.5</span> * rr * rr);                      <span class="c">// gaussian, not a disc</span>
-    soft += w * tex2Dlod(_SharpTex, float4(uv + (o * (<span class="v">1</span> + _SourceBlur) + ts) * toUv, <span class="v">0</span>, <span class="n">lod</span>)).rgb;
-}</pre>
 
 <!-- 5 -->
-<h2><small>Step 5</small>Light</h2>
-<p>Apple's rim is not a white line drawn on top. It is the light the glass bends into the rim, so a yellow card on one side turns the opposite edge yellow. A hairline catches the light on the side facing it and on the opposite side. With <b>matte</b> (Apple's Clear and Regular switch) the glass turns whiter, softer and more saturated, and a capsule gets a soft highlight.</p>
+<h2><small>Trap</small>Linear colour space</h2>
+<p>Apple's glass works on sRGB-encoded values. In a Unity project set to Linear, the frame copy holds linear light, and the same shader made black glass 0.30 instead of 0.075. Encoding the samples is not enough. The blur reads mip levels, and mips averaged in linear light turn thin dark lines into a lighter haze. So in a Linear project the package encodes the frame copy to sRGB <i>before</i> its mips are built, decodes once at the end, and draws the uGUI layer in half floats so the darkest tones survive. Both colour spaces now land within 4 of 255 of Apple on flat colours.</p>
 
-<div class="lab" id="lab3">
-  <canvas class="gl" width="900" height="560"></canvas>
-  <div class="ctl" data-params="specular lightAngle rimWhite matte brightness saturation" data-checks="pill" data-preset="light"></div>
-</div>
-
+<!-- 6 -->
+<h2><small>Step 4</small><code>.regular</code>: the frosted one</h2>
+<p><code>.regular</code> is the same filter with other inputs: a shallower bezel (0.8 S deep, 0.25 S wide), a blur that grows with the shape (σ ≈ 0.046 S), a whiter tone, a second very blurry <i>bleed</i> sample, and a shadow. Three of its behaviours only showed up in probes:</p>
+<table>
+  <tr><th>Behaviour</th><th>Measured</th></tr>
+  <tr><td>Small glass turns dark</td><td>A shape whose shorter side is under 66 pt flips to a dark variant (<code>0.072 + 0.307 × colour</code>) when the backdrop under it has a luma under about 0.19. Larger shapes never do. The filter's inputs stay the same; the flip happens in the render server.</td></tr>
+  <tr><td>Tone</td><td>Large shapes: <code>0.696 + 0.293 × colour</code>, colour 2.27× as saturated. Small shapes in the light variant follow the shader's face and bleed mix, fitted within 2 of 255.</td></tr>
+  <tr><td>Shadow</td><td>A multiplier on what is under it, the same on every colour: the outline blurred by σ 17 pt, moved 8 pt down (<code>inputShadowOffset</code> 0, 8), down to 0.84× next to a 56 pt shape. It fades to half over near-white.</td></tr>
+</table>
 <div class="two">
-  <figure><img src="img/apple_clear.png" alt="Apple clear"><figcaption>Apple <code>.clear</code></figcaption></figure>
-  <figure><img src="img/apple_regular.png" alt="Apple regular"><figcaption>Apple <code>.regular</code>. Measured against .clear: 47% whiter, blurred 2 pt more, 1.4× the saturation.</figcaption></figure>
+  <figure><img src="img/regular_small.png" alt="Small regular glass over black"><figcaption>Apple <code>.regular</code> over black: 56 pt and smaller turn dark…</figcaption></figure>
+  <figure><img src="img/regular_large.png" alt="Large regular glass over black"><figcaption>…while 68 pt and larger stay light.</figcaption></figure>
+</div>
+<p>Drag the small glass onto the dark card, and change its size or <b>matte</b>:</p>
+<div class="lab" id="lab2">
+  <canvas class="gl" width="900" height="560"></canvas>
+  <div class="ctl" data-params="matte size frostRadius specular" data-checks="pill" data-preset="regular"></div>
 </div>
 
-<figure><img src="img/close_cutout.png" alt="Reference on real art"><figcaption>The same check on real art: the game's frame, with Apple's own glass ✕ (via SwiftUI) placed exactly where our button sits.</figcaption></figure>
-<figure><img src="img/edge.png" alt="Close-up"><figcaption>Close-up: Apple's glass in the middle (its own ✕), ours on either side. The rims take on the colours from across the button.</figcaption></figure>
-
-<!-- 5b -->
-<h2><small>Step 6</small>Any shape</h2>
-<p>The lens only needs three things at each point: the distance to the outline, the direction to it, and how deep the shape is. A rounded box gives them by formula. For any other outline, the package builds them once from a sprite's alpha, as a signed distance field: an exact distance transform, lightly smoothed so the rim's fold doesn't ripple.</p>
-<figure><img src="img/heart.png" alt="Heart-shaped glass" style="max-width:420px"><figcaption>A heart-shaped glass button: the grid folds along its outline.</figcaption></figure>
+<!-- 7 -->
+<h2><small>Step 5</small>Any shape</h2>
+<p>The lens only needs three things at each point: the distance to the outline, the direction to it, and how deep the shape is. A rounded box gives them by formula. For any other outline, the package builds them once from a sprite's alpha, as a signed distance field.</p>
+<figure><img src="img/heart.png" alt="Heart-shaped glass" style="max-width:420px"><figcaption>A heart-shaped glass button.</figcaption></figure>
 <pre><span class="c">// uGUI</span>
 glass.shape = mySprite;                       <span class="c">// the glass takes the sprite's outline</span>
 <span class="c">// UI Toolkit</span>
 LiquidGlass.<span class="n">Toolkit</span>(myButton, mySprite);</pre>
 
-<!-- 6 -->
-<h2><small>Step 7</small>Putting it in a real UI: the frame's last pass</h2>
-<p>Glass needs the finished picture under it, including popups, scrolling lists and video, in the same frame. Sampling the scene in advance always lagged one frame or missed something. So the glass is drawn <i>after everything else</i>:</p>
+<!-- 8 -->
+<h2><small>Step 6</small>Putting it in a real UI: the frame's last pass</h2>
+<p>Glass needs the finished picture under it, including popups, scrolling lists and video, in the same frame. So the glass is drawn <i>after everything else</i>:</p>
 
 <svg viewBox="0 0 820 300" width="100%" role="img" aria-label="Frame pass diagram">
   <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#6e6e73"/></marker></defs>
@@ -171,9 +335,19 @@ LiquidGlass.<span class="n">Toolkit</span>(myButton, mySprite);</pre>
   </g>
 </svg>
 
-<figure><img src="img/demo_variants.png" alt="Demo variants"><figcaption>The package's demo in the iOS simulator. Left to right: <code>matte = 1</code>; a popup over half the card (its glass and its label are hidden under it); a CanvasGroup fade of 0.4; lens off.</figcaption></figure>
+<!-- 9 -->
+<h2><small>Result</small>Against Apple</h2>
+<p>Unity in the iOS simulator against SwiftUI on the same backdrop and shapes, differences on a 0–255 scale:</p>
+<table>
+  <tr><th></th><th>Gamma project</th><th>Linear project</th></tr>
+  <tr><td><code>.clear</code>, the board above, over the glass</td><td>8.2</td><td>8.1</td></tr>
+  <tr><td><code>.clear</code>, flat colours, largest error</td><td>0.4</td><td>4</td></tr>
+  <tr><td><code>.regular</code>, the board above, inside the glass / around it</td><td colspan="2">5.9 inside / 0.7 in the shadow (Linear)</td></tr>
+  <tr><td><code>.regular</code>, flat colours, 112 pt / 56 pt</td><td colspan="2">1.2 / 2.0, root mean square (Linear)</td></tr>
+</table>
+<p>What is left is mostly in the outermost points of the rim, where a pixel spans a steep part of the bezel.</p>
 
-<!-- 8 -->
+<!-- 10 -->
 <h2><small>Use it</small>Two lines</h2>
 <pre><span class="c">// Package Manager → Install from git URL: https://github.com/frodiwe/UnityLiquidGlass.git</span>
 <span class="c">// uGUI: add the Liquid Glass Button component. UI Toolkit:</span>
@@ -185,88 +359,93 @@ LiquidGlass.Settings.matte = <span class="v">1</span>;   <span class="c">// Appl
 </main>
 
 <script>
-// A WebGL2 port of LiquidGlass.cginc: the same lens over a test grid, in your browser.
-const DEFAULTS = { liquid:1, magnify:1, rimReach:-1.5, rimPower:4, lens:1, frost:1, frostRadius:2.7, sourceBlur:.5, contrast:1.3,
-  saturation:1.3, brightness:1.1, tint:.04, specular:1.4, lightAngle:135, rimWhite:.25, edgeReach:-.2, edgePower:60, matte:0, highlight:.13,
-  mipTaps:true, pill:true };
-const RANGES = { magnify:[.5,2,.01], rimReach:[-3,1,.01], rimPower:[1,10,.1], edgeReach:[-1,.5,.01], lens:[0,2,.01], frost:[0,1,.01],
-  frostRadius:[0,10,.1], sourceBlur:[0,2,.05], contrast:[.5,2,.05], specular:[0,3,.05], lightAngle:[0,360,1], rimWhite:[0,1,.01],
-  matte:[0,1,.01], brightness:[.8,1.4,.01], saturation:[0,2,.05] };
-const PRESETS = { profile:{ frost:0, specular:0, tint:0, brightness:1, saturation:1 }, frost:{}, light:{} };
-
+// A WebGL2 port of LiquidGlass.cginc: Apple's layers over a test grid, in your browser. The texture holds
+// sRGB-encoded values, as Apple's glass and the package expect.
+const DEFAULTS = { size:56, bezelWidth:20, bezelDepth:60, bezelFraction:.36, lens:1, frostRadius:1.65, frostEdge:.5, lift:.075, gain:1.04,
+  saturation:1, specular:.78, lightAngle:135, matte:0, highlight:.13, pill:true, blur:true, tone:true };
+const RANGES = { size:[24,140,1], bezelWidth:[0,40,.5], bezelDepth:[0,120,1], frostRadius:[0,8,.05], lift:[0,.4,.005], gain:[.5,1.5,.01],
+  specular:[0,2,.01], matte:[0,1,.01] };
+const PRESETS = { clear:{ size:56 }, regular:{ matte:1, size:56, pill:false } };
 const VS = `#version 300 es
 in vec2 a; out vec2 v; void main(){ v = a*.5+.5; gl_Position = vec4(a,0,1); }`;
 const FS = `#version 300 es
 precision highp float;
-uniform sampler2D T; uniform vec2 R; uniform vec4 G; uniform float U, RAD;
-uniform float liquid, magnify, rimReach, rimPower, lens, frost, frostRadius, sourceBlur, contrast, saturation, brightness, tint,
-  specular, rimWhite, edgeReach, edgePower, highlight, mipTaps; uniform vec2 L;
+uniform sampler2D T; uniform vec2 R; uniform vec4 G; uniform float U;
+uniform float bezelWidth, bezelDepth, bezelFraction, lens, frostRadius, frostEdge, lift, gain, saturation, specular, matte, highlight, useBlur, useTone;
+uniform vec2 L;
 in vec2 v; out vec4 o;
-float dist(vec2 p, vec2 h, float rad, out vec2 n){
-  float r = rad > 0. ? min(rad, min(h.x,h.y)) : min(h.x,h.y);
-  vec2 q = abs(p) - h + r;
+const vec3 W709 = vec3(.2126, .7152, .0722);
+float dist(vec2 p, vec2 h, out vec2 n){
+  float r = min(h.x, h.y); vec2 q = abs(p) - h + r;
   vec2 g = (q.x > 0. && q.y > 0.) ? normalize(q) : (q.x > q.y ? vec2(1,0) : vec2(0,1));
   n = g * (step(0., p) * 2. - 1.);
   return length(max(q, 0.)) + min(max(q.x, q.y), 0.) - r;
 }
-vec2 shift(vec2 p, vec2 h, out float x, out float d, out vec2 n){
-  d = dist(p, h, RAD, n); float Rr = min(h.x,h.y);
-  x = clamp((Rr + d) / Rr, 0., 1.);
-  float a = 1. / magnify, b = 1. + rimReach - a;
-  float edge = edgeReach * pow(x, max(edgePower, 1.));
-  return n * (a*x + b*pow(x, rimPower) + edge - x) * Rr * lens;
+vec3 sat(vec3 c, float s){ float y = dot(c, W709); return y + (c - y) * s; }
+vec3 regular(vec3 c, float dark){
+  if (dark < 0.) return .696 + .293 * sat(c, 2.267);
+  vec3 face = .719 + .417 * sat(c, 1.678), bleed = .531 - .740 * sat(c, .595);
+  float k = max(-1.048 * clamp(dot(face, W709), 0., 1.) + 1.679, 0.);
+  vec3 light = mix(face, bleed, clamp(.66 * k*k*k*k, 0., 1.));
+  return mix(light, .0716 + .3074 * sat(c, 2.217), dark);
 }
 void main(){
-  vec2 px = v * R; vec2 uv = v;
+  vec2 px = v * R, uv = v;
   vec3 bg = texture(T, uv).rgb;
   vec2 p = (px - G.xy) / U, h = G.zw / U, toUv = U / R;
-  float x, d; vec2 n; vec2 s = shift(p, h, x, d, n);
-  vec3 sharp = texture(T, uv + s * toUv).rgb;
-  vec3 soft = vec3(0); float ws = 0.;
-  float lod = mipTaps > .5 ? log2(max(1., frostRadius * (1. + sourceBlur) * .45 * U)) : 0.;
+  vec2 n; float d = dist(p, h, n), Rr = min(h.x, h.y), S = 2. * Rr;
+  float aa = max(fwidth(d), 1e-3), cover = 1. - smoothstep(-aa*.5, aa*.5, d);
+  // .regular's shadow: a multiplier on what lies outside the shape
+  vec3 under = bg;
+  if (matte > 0.) {
+    vec2 sn; float sd = dist(p + vec2(0, 8), h, sn);
+    float peak = clamp(.066 + .00164 * S, 0., .25);
+    float a = matte * peak / (1. + exp(1.702 * sd / 17.)) * (1. - .56 * smoothstep(.8, 1., dot(bg, W709)));
+    under = bg * (1. - a);
+  }
+  float e = max(-d, 0.);
+  float A = min(mix(1., .8, matte) * S, bezelDepth), H = max(min(bezelWidth, mix(bezelFraction, .25, matte) * S), 1e-3);
+  float t = clamp(e / H, 0., 1.);
+  vec2 s = -n * A * (1. - sqrt(t * (2. - t))) * lens;
+  float sigma = useBlur * mix(frostRadius, .046 * S, matte) * mix(1. - frostEdge, 1., clamp((e - 1.) / max(Rr - 1., 1e-3), 0., 1.));
+  vec3 c = vec3(0); float ws = 0.;
+  float lod = log2(max(1., sigma * .8 * U));
   for (int i = 0; i < 32; i++){
-    float an = float(i) * 2.39996, rr = sqrt((float(i) + .5) / 32.);
-    vec2 off = vec2(cos(an), sin(an)) * rr * frostRadius;
-    float tx, td; vec2 tn; vec2 ts = shift(p + off, h, tx, td, tn);
-    float w = exp(-4.5 * rr * rr);
-    soft += w * textureLod(T, uv + (off * (1. + sourceBlur) + ts) * toUv, lod).rgb; ws += w;
+    float an = float(i) * 2.39996, rr = sqrt((float(i) + .5) / 32.) * 2.5;
+    vec2 off = vec2(cos(an), sin(an)) * rr * sigma; float w = exp(-.5 * rr * rr);
+    c += w * textureLod(T, uv + (s + off) * toUv, lod).rgb; ws += w;
   }
-  soft /= ws;
-  vec3 wide = textureLod(T, uv + s * toUv, lod + 2.5).rgb;
-  soft = max(wide + (soft - wide) * contrast, 0.);
-  float Rr = min(h.x,h.y), a = 1. / magnify, b = 1. + rimReach - a;
-  float slope = abs(a + rimPower * b * pow(x, rimPower - 1.));
-  float sq = clamp((slope - 1.) / max(abs(a + rimPower * b) - 1., 1e-3), 0., 1.);
-  float facing = dot(n, normalize(L));
-  float hair = 1. - smoothstep(0., 1.2, -d);
-  vec3 refr = mix(sharp, soft, frost);
-  vec3 rimTint = mix(refr, vec3(1), rimWhite);
-  vec3 rim = rimTint * (liquid * specular * (d < 0. ? 1. : 0.) * (.08*sq*sq*(.75+.25*facing) + .4*hair*facing*facing));
-  if (h.x > h.y * 1.5) {
-    vec2 hc = vec2(-h.x + 1.7*Rr, h.y - .375*Rr);
-    float he = length((p - hc) / vec2(.54*Rr, .2*Rr));
-    rim += liquid * highlight * smoothstep(1.3, .7, he);
+  c /= ws;
+  if (useTone > .5) {
+    vec3 clear = clamp(lift + gain * c, 0., 1.);
+    float dark = -1.;
+    if (matte > 0. && S < 66.) dark = 1. - smoothstep(.17, .195, dot(textureLod(T, uv - p * toUv, log2(max(1., S * U))).rgb, W709));
+    c = mix(clear, clamp(regular(c, dark), 0., 1.), matte);
   }
-  vec3 g = mix(bg, refr, liquid);
-  float grey = dot(g, vec3(.299,.587,.114));
-  g = max(grey + (g - grey) * saturation, 0.);
-  g = mix(g * brightness, vec3(1), tint) + rim;
-  float aa = max(fwidth(d), 1e-3);
-  float cover = 1. - smoothstep(-aa*.5, aa*.5, d);
-  o = vec4(mix(bg, g, cover), 1);
+  float facing = abs(dot(n, normalize(L)));
+  float hair = specular * facing * exp(-.5 * pow((e - .5) / .35, 2.));
+  vec3 vib = clamp(vec3(dot(c, vec3(1.2024, -1.0014, -.1010)), dot(c, vec3(-.2976, .4987, -.1011)), dot(c, vec3(-.2977, -1.0012, 1.3989))) + .9, 0., 1.);
+  c = mix(c, vib, clamp(hair, 0., 1.));
+  if (matte > 0. && h.x > h.y * 1.5) {
+    vec2 hc = vec2(-h.x + 1.7 * Rr, h.y - .375 * Rr);
+    c += matte * highlight * smoothstep(1.3, .7, length((p - hc) / vec2(.54 * Rr, .2 * Rr)));
+  }
+  o = vec4(mix(under, clamp(c, 0., 1.), cover), 1);
 }`;
 
 function backdrop(w, h, u){
-  // Apple's test grid (tan paper, lines every 10 pt, red diagonals every 25 pt), plus a few colour cards.
+  // Apple's test grid (tan paper, lines every 10 pt, red diagonals every 25 pt), colour cards, and a dark card.
   const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d');
   g.fillStyle = 'rgb(217,179,128)'; g.fillRect(0,0,w,h);
-  const cards = [['#ffd23f', .12, .18], ['#3f8cff', .78, .62], ['#3fc46b', .52, .12], ['#ff5a4e', .3, .78]];
+  const cards = [['#ffd23f', .12, .18], ['#3f8cff', .5, .78], ['#3fc46b', .45, .14], ['#ff5a4e', .18, .8]];
   for (const [col, x, y] of cards){ g.fillStyle = col; g.beginPath(); g.roundRect(x*w - 22*u, y*h - 16*u, 44*u, 32*u, 8*u); g.fill(); }
   g.strokeStyle = 'rgb(204,26,26)'; g.lineWidth = .8*u;
   for (let k = -h; k < w + h; k += 25*u){ g.beginPath(); g.moveTo(k, 0); g.lineTo(k - h, h); g.stroke(); }
   g.fillStyle = 'rgb(38,38,77)';
   for (let x = 0; x <= w; x += 10*u) g.fillRect(Math.round(x), 0, Math.max(1, u), h);
   for (let y = 0; y <= h; y += 10*u) g.fillRect(0, Math.round(y), w, Math.max(1, u));
+  g.fillStyle = 'rgb(24,26,40)'; g.beginPath(); g.roundRect(.68*w, .08*h, .28*w, .5*h, 14*u); g.fill();
+  g.fillStyle = 'rgb(230,232,240)'; g.font = `${11*u}px -apple-system, sans-serif`; g.fillText('dark', .7*w, .14*h);
   return c;
 }
 
@@ -290,62 +469,45 @@ function lab(root){
   let cx = cv.width * .5, cy = cv.height * .5;
 
   function draw(){
-    const pill = P.pill, hw = (pill ? 90 : 40) * U, hh = (pill ? 28 : 40) * U;
-    const m = Math.min(1, Math.max(0, P.matte));
+    const hh = P.size / 2 * U, hw = P.pill ? Math.max(hh, 90 * U) : hh;
     gl.viewport(0, 0, cv.width, cv.height);
-    gl.uniform2f(loc('R'), cv.width, cv.height); gl.uniform4f(loc('G'), cx, cy, hw, hh);
-    gl.uniform1f(loc('U'), U); gl.uniform1f(loc('RAD'), 0);
-    const f = { ...P, tint: 1 - (1 - P.tint) * (1 - .47*m), frostRadius: P.frostRadius + 2*m, highlight: P.highlight*m, saturation: P.saturation + .4*m };
-    for (const k of ['liquid','magnify','rimReach','rimPower','lens','frost','frostRadius','sourceBlur','contrast','saturation','brightness','tint','specular','rimWhite','edgeReach','edgePower','highlight'])
-      gl.uniform1f(loc(k), f[k]);
-    gl.uniform1f(loc('mipTaps'), P.mipTaps ? 1 : 0);
+    gl.uniform2f(loc('R'), cv.width, cv.height); gl.uniform4f(loc('G'), cx, cy, hw, hh); gl.uniform1f(loc('U'), U);
+    for (const k of ['bezelWidth','bezelDepth','bezelFraction','lens','frostRadius','frostEdge','lift','gain','saturation','specular','matte','highlight'])
+      gl.uniform1f(loc(k), P[k]);
+    gl.uniform1f(loc('useBlur'), P.blur ? 1 : 0); gl.uniform1f(loc('useTone'), P.tone ? 1 : 0);
     const an = P.lightAngle * Math.PI / 180; gl.uniform2f(loc('L'), Math.cos(an), Math.sin(an));
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     if (plot) drawPlot();
-    if (root.id === 'lab1') formula();
   }
 
   function drawPlot(){
-    const g = plot.getContext('2d'), W = plot.width, H = plot.height, pad = 36;
+    const g = plot.getContext('2d'), W = plot.width, H = plot.height, pad = 40;
     g.clearRect(0,0,W,H);
-    const X = x => pad + 4 + x * (W - 2*pad - 8), Y = y => H/2 - y * (H/2 - pad) / 2;
-    g.strokeStyle = '#e5e5ea'; g.lineWidth = 1;
-    for (const y of [-2,-1,0,1,2]){ g.beginPath(); g.moveTo(pad, Y(y)); g.lineTo(W-pad, Y(y)); g.stroke(); }
-    g.fillStyle = '#6e6e73'; g.font = '20px -apple-system, sans-serif';
-    g.fillText('middle', X(0) - 20, H - 8); g.fillText('rim', X(1) - 24, H - 8);
-    g.fillText('+1', 2, Y(1) + 7); g.fillText('0', 12, Y(0) + 7); g.fillText('−1', 2, Y(-1) + 7); g.fillText('far side', pad + 4, Y(-1.75));
-    g.setLineDash([5,4]); g.strokeStyle = '#aeaeb2'; g.beginPath(); g.moveTo(X(0), Y(0)); g.lineTo(X(1), Y(1)); g.stroke(); g.setLineDash([]);
-    const a = 1 / P.magnify, b = 1 + P.rimReach - a;
+    const X = e => pad + e / 30 * (W - 2*pad), Y = y => pad/2 + y / 60 * (H - 1.5*pad);
+    g.strokeStyle = '#e5e5ea'; g.lineWidth = 1; g.fillStyle = '#6e6e73'; g.font = '18px -apple-system, sans-serif';
+    for (const y of [0,20,40,60]){ g.beginPath(); g.moveTo(pad, Y(y)); g.lineTo(W-pad, Y(y)); g.stroke(); g.fillText(String(y), 4, Y(y) + 6); }
+    for (const e of [0,10,20,30]) g.fillText(String(e), X(e) - 6, H - 6);
+    const S = P.size, A = Math.min(S, P.bezelDepth), Hh = Math.max(Math.min(P.bezelWidth, P.bezelFraction * S), 1e-3);
     g.strokeStyle = '#0071e3'; g.lineWidth = 3; g.beginPath();
-    for (let i = 0; i <= 200; i++){ const x = i/200; const y = (a*x + b*Math.pow(x, P.rimPower) + P.edgeReach*Math.pow(x, Math.max(1,P.edgePower)) - x) * P.lens + x;
-      i ? g.lineTo(X(x), Y(y)) : g.moveTo(X(x), Y(y)); }
+    for (let i = 0; i <= 200; i++){ const e = i / 200 * 30, t = Math.min(e / Hh, 1), y = A * (1 - Math.sqrt(t * (2 - t))) * P.lens;
+      i ? g.lineTo(X(e), Y(y)) : g.moveTo(X(e), Y(y)); }
     g.stroke();
-  }
-
-  function formula(){
-    const a = 1 / P.magnify, b = 1 + P.rimReach - a, f = n => (Math.round(n*100)/100).toString();
-    document.getElementById('formula').innerHTML =
-      `<span class="c">// sampled at U = R · g(x), x: 0 on the middle line, 1 on the outline</span>\n` +
-      `g(x) = <span class="v">${f(a)}</span>·x <span class="k">+</span> <span class="v">${f(b)}</span>·x^<span class="v">${f(P.rimPower)}</span> <span class="k">+</span> <span class="v">${f(P.edgeReach)}</span>·x^<span class="v">${f(P.edgePower)}</span>` +
-      `   <span class="c">// 1/magnify, 1 + rimReach − 1/magnify, edgeReach</span>`;
   }
 
   for (const k of (ctl.dataset.params || '').split(' ').filter(Boolean)){
     const [lo, hi, st] = RANGES[k];
     const lab = document.createElement('label'); lab.textContent = k;
     const r = Object.assign(document.createElement('input'), { type:'range', min:lo, max:hi, step:st, value:P[k] });
-    const out = document.createElement('output'); out.textContent = (+P[k]).toFixed(2);
-    r.oninput = () => { P[k] = +r.value; out.textContent = (+r.value).toFixed(2); draw(); };
+    const out = document.createElement('output'); out.textContent = (+P[k]).toFixed(k === 'size' ? 0 : 2);
+    r.oninput = () => { P[k] = +r.value; out.textContent = (+r.value).toFixed(k === 'size' ? 0 : 2); draw(); };
     ctl.append(lab, r, out);
   }
-  const checks = (ctl.dataset.checks || '').split(' ').filter(Boolean);
+  const names = { pill:'capsule (off: circle)', blur:'blur', tone:'tone' };
   const box = document.createElement('div'); box.className = 'chk';
-  for (const k of checks){
+  for (const k of (ctl.dataset.checks || '').split(' ').filter(Boolean)){
     const l = document.createElement('label'); const c = Object.assign(document.createElement('input'), { type:'checkbox', checked:P[k] });
-    c.onchange = () => { P[k] = c.checked; draw(); }; l.append(c, ' ', k === 'mipTaps' ? 'mip per tap' : k === 'pill' ? 'capsule (off: circle)' : k); box.append(l);
+    c.onchange = () => { P[k] = c.checked; draw(); }; l.append(c, ' ', names[k] || k); box.append(l);
   }
-  const sh2 = document.createElement('label'); const sc = Object.assign(document.createElement('input'), { type:'checkbox', checked:P.pill });
-  if (!checks.includes('pill')){ sc.onchange = () => { P.pill = sc.checked; draw(); }; sh2.append(sc, ' capsule (off: circle)'); box.append(sh2); }
   ctl.append(box);
 
   let drag = false;

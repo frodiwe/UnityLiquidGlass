@@ -44,7 +44,7 @@ namespace UnityLiquidGlass
             ToLinear = Shader.PropertyToID("_ToLinear"), Fade = Shader.PropertyToID("_Fade"),
             LayerTex = Shader.PropertyToID("_Layer"), FrameTex = Shader.PropertyToID("_Frame"),
             LayerScreen = Shader.PropertyToID("_LayerScreen"), ShapeTex = Shader.PropertyToID("_ShapeTex"),
-            ShapeUV = Shader.PropertyToID("_ShapeUV"), ShapeTexels = Shader.PropertyToID("_ShapeTexels"), GuiZTest = Shader.PropertyToID("unity_GUIZTestMode");
+            ShapeUV = Shader.PropertyToID("_ShapeUV"), ShapeTexels = Shader.PropertyToID("_ShapeTexels"), GlassShadow = Shader.PropertyToID("_GlassShadow"), GuiZTest = Shader.PropertyToID("unity_GUIZTestMode");
         static readonly Vector3[] Corners = new Vector3[4];
         static readonly List<Graphic> Scratch = new();
         static readonly List<Vector4> Uvs = new();
@@ -188,6 +188,22 @@ namespace UnityLiquidGlass
             float flip = SystemInfo.graphicsUVStartsAtTop ? 1f : 0f;
             _layer.SetFloat(ToLinear, linear ? 1f : 0f);
 
+            // .regular casts a soft shadow around each shape, straight onto the screen before the glass. A uGUI
+            // shape's shadow shows only while its marker survived at its centre (nothing drawn over it).
+            if (LiquidGlass.Settings.matte > 0)
+            {
+                RenderTexture.active = null;   // the blit above left the mips as the target
+                GL.PushMatrix();
+                GL.LoadPixelMatrix(0, w, 0, h);
+                if (ugui) foreach (var b in _buttons)
+                    if (UguiRect(b, out var r, out float units) is var a && a > .001f)
+                        Shadow(r, units, b.cornerRadius, b.shape, a, flip, linear, marker: true);
+                foreach (var t in _toolkit)
+                    if (ToolkitRect(t, w, h, out var r, out float units) is var a && a > .001f)
+                        Shadow(r, units, t.Radius, t.Shape, a, flip, linear, marker: false);
+                GL.PopMatrix();
+            }
+
             // Linear values in 8 bits lose the darkest tones (the glass over black came out 0.051, not 0.075).
             var layer = ugui ? RenderTexture.GetTemporary(w, h, 0, linear ? RenderTextureFormat.ARGBHalf : RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear) : null;
             RenderTexture.active = layer;
@@ -199,14 +215,8 @@ namespace UnityLiquidGlass
             bool drew = false;
             if (ugui) foreach (var b in _buttons)
             {
-                float alpha = Alpha(b);
+                float alpha = UguiRect(b, out var r, out float units);
                 if (alpha <= .001f) continue;
-                var r = ScreenRect(b.Shape.rectTransform);
-                var canvas = b.Shape.canvas;
-                float units = canvas != null ? canvas.rootCanvas.scaleFactor : 1f;   // screen px per canvas unit
-                float inset = b.inset * units;
-                r = Rect.MinMaxRect(r.xMin + inset, r.yMin + inset, r.xMax - inset, r.yMax - inset);
-                if (r.width <= 0 || r.height <= 0) continue;
                 Glass(r, units, b.cornerRadius, b.shape, alpha, flip);
                 drew = true;
                 foreach (var g in _content[b]) DrawContent(g);
@@ -225,12 +235,8 @@ namespace UnityLiquidGlass
 
             foreach (var t in _toolkit)
             {
-                float alpha = Alpha(t.Element);
-                if (alpha <= .001f || Covered(t.Element)) continue;
-                var panel = t.Element.panel;
-                float toScreen = w / Mathf.Max(1f, panel.visualTree.worldBound.width);
-                var r = PanelToScreen(t.Element.worldBound, toScreen, h);
-                if (r.width <= 0 || r.height <= 0) continue;
+                float alpha = ToolkitRect(t, w, h, out var r, out float toScreen);
+                if (alpha <= .001f) continue;
                 Glass(r, toScreen, t.Radius, t.Shape, alpha, flip);
                 if (t.Copy.Texture != null && t.Copy.Crop.width > 0)
                     // Unity's own render texture reads right side up in a quad on every API; it holds straight alpha.
@@ -239,7 +245,48 @@ namespace UnityLiquidGlass
             GL.PopMatrix();
         }
 
+        // A uGUI shape's screen rect and px per canvas unit; returns its alpha (0: not drawn).
+        float UguiRect(LiquidGlassButton b, out Rect r, out float units)
+        {
+            r = default; units = 1f;
+            float alpha = Alpha(b);
+            if (alpha <= .001f) return 0f;
+            r = ScreenRect(b.Shape.rectTransform);
+            var canvas = b.Shape.canvas;
+            units = canvas != null ? canvas.rootCanvas.scaleFactor : 1f;   // screen px per canvas unit
+            float inset = b.inset * units;
+            r = Rect.MinMaxRect(r.xMin + inset, r.yMin + inset, r.xMax - inset, r.yMax - inset);
+            return r.width > 0 && r.height > 0 ? alpha : 0f;
+        }
+
+        // A UI Toolkit shape's screen rect and px per panel unit; returns its alpha (0: not drawn, or covered).
+        float ToolkitRect(ToolkitItem t, int w, int h, out Rect r, out float toScreen)
+        {
+            r = default; toScreen = 1f;
+            float alpha = Alpha(t.Element);
+            if (alpha <= .001f || Covered(t.Element)) return 0f;
+            toScreen = w / Mathf.Max(1f, t.Element.panel.visualTree.worldBound.width);
+            r = PanelToScreen(t.Element.worldBound, toScreen, h);
+            return r.width > 0 && r.height > 0 ? alpha : 0f;
+        }
+
+        void Shadow(Rect r, float units, float radius, Sprite shape, float alpha, float flip, bool linear, bool marker)
+        {
+            SetShape(r, units, radius, shape, alpha, flip);
+            _glass.SetVector(GlassShadow, new Vector4(marker ? 1f : 0f, linear ? 1f : 0f, 0, 0));
+            _glass.SetPass(1);
+            float m = 60f * units;   // 3 sigma and the 8 point offset
+            Quad(Rect.MinMaxRect(r.xMin - m, r.yMin - m, r.xMax + m, r.yMax + m));
+        }
+
         void Glass(Rect r, float units, float radius, Sprite shape, float alpha, float flip)
+        {
+            SetShape(r, units, radius, shape, alpha, flip);
+            _glass.SetPass(0);
+            Quad(r);
+        }
+
+        void SetShape(Rect r, float units, float radius, Sprite shape, float alpha, float flip)
         {
             if (shape != null && ShapeField.Of(shape) is { } field)
             {
@@ -251,8 +298,6 @@ namespace UnityLiquidGlass
             else radius = Mathf.Max(0f, radius);
             _glass.SetVector(GlassRect, new Vector4(r.center.x, r.center.y, r.width * .5f, r.height * .5f));
             _glass.SetVector(GlassShape, new Vector4(units, radius, alpha, flip));
-            _glass.SetPass(0);
-            Quad(r);
         }
 
         void DrawContent(Graphic g)

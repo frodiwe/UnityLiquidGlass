@@ -60,6 +60,8 @@ Every field has a tooltip. The defaults are Apple's `.clear`, read from its runn
 
 All of it works on sRGB-encoded values, as Apple's does, in Gamma and Linear projects alike.
 
+`matte = 1` is Apple's `.regular`, measured the same way: a shallower bezel, a blur that grows with the shape, a whiter tone, a soft shadow, and on shapes under 66 pt a dark variant over dark backdrops, as Apple's small glass turns dark.
+
 **Demo.** Package Manager → Liquid Glass → Samples → **Demo**. Add `LiquidGlassDemo` to an empty GameObject and press Play.
 
 ## How it works

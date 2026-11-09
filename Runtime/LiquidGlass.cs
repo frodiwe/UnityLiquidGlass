@@ -110,11 +110,10 @@ namespace UnityLiquidGlass
             m.SetFloat("_Gain", Mathf.Max(0f, s.gain));
             m.SetFloat("_Saturation", Mathf.Max(0f, s.saturation));
             m.SetFloat("_FrostEdge", Mathf.Clamp01(s.frostEdge));
-            // matte 1 approximates Apple's .regular over a light backdrop: its face matrix (black 0.5) and a
-            // blur 2.86x .clear's, read from the running filter, and a highlight on capsules. Apple's
-            // .regular also turns dark over dark backdrops; that is not modelled.
-            m.SetFloat("_Tint", .5f * matte);
-            m.SetFloat("_FrostRadius", Mathf.Max(0f, s.frostRadius) * (1f + 1.86f * matte));
+            // matte blends .clear into Apple's .regular, whose numbers are measured constants in the shader
+            // (bezel, blur, tone, shadow, and the dark variant of small shapes over dark backdrops).
+            m.SetFloat("_Matte", matte);
+            m.SetFloat("_FrostRadius", Mathf.Max(0f, s.frostRadius));
             m.SetFloat("_Highlight", Mathf.Max(0f, s.highlight) * matte);
             m.SetVector("_LightDir", new Vector4(Mathf.Cos(angle), Mathf.Sin(angle)));
         }

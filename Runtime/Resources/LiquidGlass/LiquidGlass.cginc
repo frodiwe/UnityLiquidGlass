@@ -13,6 +13,10 @@
 //   3. One colour transform over what the glass shows: lift + gain * c (Apple's face colour matrix).
 //   4. A hairline highlight lit by two opposite lights (key and fill), in a colour derived from what is
 //      under it (Apple's vibrant colour matrix), so it vanishes over bright greens and glows over darks.
+// _Matte blends .clear (0) into .regular (1), whose own numbers are measured constants below: a narrower,
+// shallower bezel (0.8 S deep, 0.25 S wide), a blur that grows with the shape (sigma 0.046 S), its own
+// tone, a soft shadow under it (LiquidShadow) and, on shapes under 66 points, a dark variant over dark
+// backdrops (Apple flips small glass to dark where the backdrop's mean luma is under about 0.19).
 // Apple does all of this on sRGB-encoded values. A shader that reads a frame copy encoded that way in a
 // Linear project (LiquidGlassPass encodes it before its mips are built) defines LIQUID_GLASS_SRGB_FRAME,
 // and LiquidFinish decodes its result.
@@ -22,7 +26,7 @@
 sampler2D _SharpTex;
 float4 _SharpTex_TexelSize;
 float  _Liquid, _LensStrength, _BezelDepth, _BezelWidth, _BezelFraction, _Dispersion;
-float  _FrostRadius, _FrostEdge, _Lift, _Gain, _Saturation, _Tint, _Specular, _Highlight;
+float  _FrostRadius, _FrostEdge, _Lift, _Gain, _Saturation, _Matte, _Specular, _Highlight;
 float4 _LightDir;
 
 // A custom shape (radius < 0): its outline as a signed distance field (ShapeField), sampled over the
@@ -60,14 +64,15 @@ float2 LiquidShift(float2 p, float2 halfSize, float radius, out float e, out flo
     float d = LiquidDistance(p, halfSize, radius, n);
     e = max(-d, 0);
     float S = 2 * LiquidInscribed(halfSize, radius);
-    float A = min(S, _BezelDepth);
-    float H = max(min(_BezelWidth, _BezelFraction * S), 1e-3);
+    float A = min(lerp(1, .8, _Matte) * S, _BezelDepth);
+    float H = max(min(_BezelWidth, lerp(_BezelFraction, .25, _Matte) * S), 1e-3);
     float t = saturate(e / H);
     return -n * A * (1 - sqrt(t * (2 - t))) * _LensStrength;
 }
 
 // `flat` is what the glass shows with the lens off (_Liquid 0). `toUv` turns an offset in points into a
-// backdrop-UV offset. rimLight.x gets the hairline's strength, rimLight.y the frosted capsule highlight's.
+// backdrop-UV offset. rimLight.x gets the hairline's strength, rimLight.y the frosted capsule highlight's,
+// rimLight.z how dark a small .regular glass turns (0..1; -1 on a large shape, which never does).
 half3 LiquidBackdrop(half3 flat, float2 bguv, float2 p, float2 halfSize, float radius, float2 toUv, out half3 rimLight)
 {
     rimLight = 0;
@@ -77,7 +82,7 @@ half3 LiquidBackdrop(half3 flat, float2 bguv, float2 p, float2 halfSize, float r
     float R = LiquidInscribed(halfSize, radius);
     // The blur is lighter towards the outline: full in the middle, (1 - _FrostEdge) at the edge (Apple's
     // blur opacities: 1 in the middle, 0.5 a point inside the outline).
-    float sigma = _FrostRadius * lerp(1 - _FrostEdge, 1, saturate((e - 1) / max(R - 1, 1e-3)));
+    float sigma = lerp(_FrostRadius, .046 * 2 * R, _Matte) * lerp(1 - _FrostEdge, 1, saturate((e - 1) / max(R - 1, 1e-3)));
     // Gaussian blur of the backdrop around the refracted point: 32 taps on a golden-angle spiral out
     // to 2.5 sigma, each from a mip level about as wide as the gap between taps.
     // Where the bezel squeezes the backdrop, one screen pixel covers many backdrop texels: read a
@@ -108,6 +113,14 @@ half3 LiquidBackdrop(half3 flat, float2 bguv, float2 p, float2 halfSize, float r
     // on the outline's side facing either, gone across from them; half a point inside the outline.
     float facing = abs(dot(n, normalize(_LightDir.xy)));
     rimLight.x = _Liquid * _Specular * facing * exp(-.5 * pow((e - .5) / .35, 2));
+    // .regular on a small shape (under 66 points) turns dark over a dark backdrop: the mean luma under
+    // the whole shape, read from a mip about as wide as the shape.
+    rimLight.z = -1;
+    if (_Matte > 0 && 2 * R < 66)
+    {
+        half3 mean = tex2Dlod(_SharpTex, float4(bguv - p * toUv, 0, log2(max(1, 2 * R * texelsPerPt)))).rgb;
+        rimLight.z = 1 - smoothstep(.17, .195, dot(mean, half3(.2126, .7152, .0722)));
+    }
     // A frosted capsule catches a soft highlight: an oval near its top-left, 1.7 R in from the left end
     // (Apple's .regular capsule: 30 x 11 pt on a 56 pt tall one, about 9% brighter). Not on circles.
     if (_Highlight > 0 && radius >= 0 && halfSize.x > halfSize.y * 1.5)
@@ -119,15 +132,29 @@ half3 LiquidBackdrop(half3 flat, float2 bguv, float2 p, float2 halfSize, float r
     return lerp(flat, c, _Liquid);
 }
 
+half3 LiquidSaturate(half3 c, half s) { half y = dot(c, half3(.2126, .7152, .0722)); return y + (c - y) * s; }
+
+// .regular's tone, measured over flat backdrops in the simulator (sRGB, within 2/255): a large shape
+// lift + gain * saturate(c); a small one dark or light with the backdrop. The light one keeps the shape of
+// Apple's shader, a face colour blended towards a bleed colour by the face's own luma.
+half3 LiquidRegular(half3 c, half dark)
+{
+    if (dark < 0) return .696 + .293 * LiquidSaturate(c, 2.267);
+    half3 face = .719 + .417 * LiquidSaturate(c, 1.678);
+    half3 bleed = .531 - .740 * LiquidSaturate(c, .595);
+    half k = max(-1.048 * saturate(dot(face, half3(.2126, .7152, .0722))) + 1.679, 0);
+    half3 light = lerp(face, bleed, saturate(.66 * k * k * k * k));
+    return lerp(light, .0716 + .3074 * LiquidSaturate(c, 2.217), dark);
+}
+
 // The one look every glass shape ends with, on sRGB-encoded colour: Apple's face colour matrix (lift,
-// gain, saturation), a white tint for the frosted variant, then the hairline in the vibrant colour of
+// gain, saturation) for .clear, .regular's tone by _Matte, then the hairline in the vibrant colour of
 // what it lies over.
 half3 LiquidFinish(half3 c, half3 rimLight)
 {
     half grey = dot(c, half3(.299, .587, .114));
-    c = grey + (c - grey) * (_Saturation > 0 ? _Saturation : 1);
-    c = saturate(_Lift + _Gain * c);
-    c = lerp(c, 1, _Tint);
+    half3 clear = saturate(_Lift + _Gain * (grey + (c - grey) * (_Saturation > 0 ? _Saturation : 1)));
+    c = _Matte > 0 ? lerp(clear, saturate(LiquidRegular(c, rimLight.z)), _Matte) : clear;
     // Apple's vibrant colour matrix for the highlight: near white over dark and neutral colours, the
     // colour itself over bright ones (over a bright green the line disappears).
     half3 v = saturate(half3(dot(c, half3(1.2024, -1.0014, -.1010)),
@@ -139,6 +166,20 @@ half3 LiquidFinish(half3 c, half3 rimLight)
     c = GammaToLinearSpace(c);   // the frame's values are linear in a Linear project
 #endif
     return c;
+}
+
+// .regular's shadow at p outside the shape: how much it darkens what is there (a multiplier 1 - alpha on
+// sRGB values, the same on every colour). The outline blurred (sigma 17 points) and moved 8 points down,
+// as Apple's (inputShadowOffset 0, 8): 0.158 at most under a 56 point shape, 0.25 under a 112 point one;
+// over near-white Apple's shadow fades to half (its SDR holding tone), so `luma` is what lies there.
+half LiquidShadow(float2 p, float2 halfSize, float radius, half luma)
+{
+    if (_Matte <= 0) return 0;
+    float2 n;
+    float S = 2 * LiquidInscribed(halfSize, radius);
+    float d = LiquidDistance(p + float2(0, 8), halfSize, radius, n);
+    half peak = clamp(.066 + .00164 * S, 0, .25);
+    return _Matte * peak / (1 + exp(1.702 * d / 17)) * (1 - .56 * smoothstep(.8, 1, luma));
 }
 
 // The button's coverage from its rounded-box outline, antialiased: the same edge for every shape.
