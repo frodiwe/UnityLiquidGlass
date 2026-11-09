@@ -17,24 +17,19 @@ namespace UnityLiquidGlass
         public sealed class Look
         {
             [Tooltip("0 = a flat tinted pane, 1 = liquid glass.")] public float liquid = 1f;
-            [Tooltip("How much the middle is enlarged (1 = not at all).")] public float magnify = 1f;
-            [Tooltip("Where the outline samples, in half heights from the middle; below 0 = the far side, so the image folds back at the rim.")] public float rimReach = -1.5f;
-            [Tooltip("How tight to the edge the fold sits (higher = thinner rim).")] public float rimPower = 4f;
+            [Tooltip("How far in the outline shows the backdrop, points; capped at the shape's shorter side (Apple: 60).")] public float bezelDepth = 60f;
+            [Tooltip("The bezel's width along the outline, points; the middle inside it is flat (Apple: 20).")] public float bezelWidth = 20f;
+            [Tooltip("On small shapes the bezel is at most this share of the shorter side (Apple: 0.36).")] public float bezelFraction = .36f;
             [Tooltip("Multiplier on the whole lens (0 = flat glass).")] public float lensStrength = 1f;
             [Tooltip("Colour split where the glass bends (0 = none, as Apple's).")] public float dispersion = 0f;
-            [Tooltip("How much light scatters: 0 = clear, 1 = all of it blurred by frostRadius.")] public float frost = 1f;
-            [Tooltip("The frost blur's radius, points.")] public float frostRadius = 2.7f;
-            [Tooltip("The backdrop's own blur before the lens, relative to frostRadius.")] public float sourceBlur = .5f;
-            [Tooltip("How much blurred detail stands out from the glass around it.")] public float contrast = 1.3f;
-            [Tooltip("Colour strength of what the glass shows (vibrancy).")] public float saturation = 1.3f;
-            [Tooltip("What the glass shows is this much brighter.")] public float brightness = 1.1f;
-            [Tooltip("White mixed over the glass (0 = clear).")] public float tint = .04f;
-            [Tooltip("Light on the squeezed rim and the hairline on the outline.")] public float specular = 1.4f;
-            [Tooltip("Where the light comes from, degrees (0 = right, 90 = top).")] public float lightAngle = 135f;
-            [Tooltip("The rim's light takes the colour under the edge; this much of it is white instead.")] public float rimWhite = .25f;
-            [Tooltip("Right at the outline the fold reaches this far towards the far side (the rim shows the colours opposite it).")] public float edgeReach = -.2f;
-            [Tooltip("How thin that edge band is.")] public float edgePower = 60f;
-            [Tooltip("Apple's Clear / Tinted switch as a slider: 0 = .clear, 1 = .regular (whiter, softer, more saturated, a highlight on capsules).")] public float matte = 0f;
+            [Tooltip("The blur of what the glass shows: Gaussian sigma, points (Apple's .clear: 1.65).")] public float frostRadius = 1.65f;
+            [Tooltip("How much lighter the blur is at the outline than in the middle (Apple: 0.5).")] public float frostEdge = .5f;
+            [Tooltip("Added to every channel of what the glass shows, sRGB (Apple's .clear: 0.075).")] public float lift = .075f;
+            [Tooltip("What the glass shows is multiplied by this, sRGB (Apple's .clear: 1.04).")] public float gain = 1.04f;
+            [Tooltip("Colour strength of what the glass shows (1 = unchanged, as Apple's .clear).")] public float saturation = 1f;
+            [Tooltip("The hairline highlight on the outline (0 = none).")] public float specular = .78f;
+            [Tooltip("Where the hairline's key light comes from, degrees (0 = right, 90 = top); a fill light shines from the opposite side.")] public float lightAngle = 135f;
+            [Tooltip("Apple's Clear / Tinted switch as a slider: 0 = .clear, 1 = .regular (whiter, softer, a highlight on capsules).")] public float matte = 0f;
             [Tooltip("The soft highlight a .regular capsule catches over its left cap (scaled by matte).")] public float highlight = .13f;
         }
 
@@ -105,25 +100,22 @@ namespace UnityLiquidGlass
             var s = Settings;
             float matte = Mathf.Clamp01(s.matte), angle = s.lightAngle * Mathf.Deg2Rad;
             m.SetFloat("_Liquid", Mathf.Clamp01(s.liquid));
-            m.SetFloat("_Magnify", Mathf.Max(.1f, s.magnify));
-            m.SetFloat("_RimReach", s.rimReach);
-            m.SetFloat("_RimPower", Mathf.Max(1f, s.rimPower));
+            m.SetFloat("_BezelDepth", Mathf.Max(0f, s.bezelDepth));
+            m.SetFloat("_BezelWidth", Mathf.Max(.01f, s.bezelWidth));
+            m.SetFloat("_BezelFraction", Mathf.Max(.01f, s.bezelFraction));
             m.SetFloat("_LensStrength", s.lensStrength);
             m.SetFloat("_Dispersion", s.dispersion);
-            m.SetFloat("_Frost", Mathf.Clamp01(s.frost));
             m.SetFloat("_Specular", Mathf.Max(0f, s.specular));
-            // matte 1 is Apple's .regular, measured against .clear on the same grid: 47% whiter,
-            // blurred 2 points more, 1.4x as saturated, a highlight on capsules.
-            m.SetFloat("_Tint", 1f - (1f - Mathf.Clamp01(s.tint)) * (1f - .47f * matte));
-            m.SetFloat("_Brightness", Mathf.Max(0f, s.brightness));
-            m.SetFloat("_FrostRadius", Mathf.Max(0f, s.frostRadius) + 2f * matte);
-            m.SetFloat("_SourceBlur", Mathf.Max(0f, s.sourceBlur));
+            m.SetFloat("_Lift", s.lift);
+            m.SetFloat("_Gain", Mathf.Max(0f, s.gain));
+            m.SetFloat("_Saturation", Mathf.Max(0f, s.saturation));
+            m.SetFloat("_FrostEdge", Mathf.Clamp01(s.frostEdge));
+            // matte 1 approximates Apple's .regular over a light backdrop: its face matrix (black 0.5) and a
+            // blur 2.86x .clear's, read from the running filter, and a highlight on capsules. Apple's
+            // .regular also turns dark over dark backdrops; that is not modelled.
+            m.SetFloat("_Tint", .5f * matte);
+            m.SetFloat("_FrostRadius", Mathf.Max(0f, s.frostRadius) * (1f + 1.86f * matte));
             m.SetFloat("_Highlight", Mathf.Max(0f, s.highlight) * matte);
-            m.SetFloat("_Saturation", Mathf.Max(0f, s.saturation) + .4f * matte);
-            m.SetFloat("_Contrast", Mathf.Max(0f, s.contrast));
-            m.SetFloat("_RimWhite", Mathf.Clamp01(s.rimWhite));
-            m.SetFloat("_EdgeReach", s.edgeReach);
-            m.SetFloat("_EdgePower", Mathf.Max(1f, s.edgePower));
             m.SetVector("_LightDir", new Vector4(Mathf.Cos(angle), Mathf.Sin(angle)));
         }
     }

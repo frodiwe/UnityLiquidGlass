@@ -14,6 +14,7 @@ Shader "Hidden/LiquidGlass/Glass"
             #pragma fragment frag
             #pragma target 3.0
             #include "UnityCG.cginc"
+            #define LIQUID_GLASS_SRGB_FRAME   // LiquidGlassPass encodes the frame copy in Linear projects
             #include "LiquidGlass.cginc"
 
             float4 _GlassRect;     // centre (screen px, y up), half size (screen px)

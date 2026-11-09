@@ -51,7 +51,14 @@ LiquidGlass.Settings.frostRadius = 4;    // softer
 LiquidGlass.Settings.lightAngle = 45;    // light from the top right
 ```
 
-Every field has a tooltip. The defaults were tuned against Apple's glass, with colour tuned on real game art; they are close to Apple's, not identical.
+Every field has a tooltip. The defaults are Apple's `.clear`, read from its running `glassBackground` filter in the iOS 26 simulator and checked on probes: the glass is built in Apple's order, from the same parts:
+
+1. The backdrop is blurred (Gaussian, σ 1.65 pt), lighter towards the outline.
+2. A bezel along the outline refracts it. Its width is fixed in points (20 pt, at most 0.36 of a small shape's shorter side) and its profile is a quarter circle. The middle is flat, with no magnification.
+3. One tone over what the glass shows: 0.075 + 1.04 × colour, per sRGB channel.
+4. A hairline lit by two opposite lights, in a colour taken from what lies under it.
+
+All of it works on sRGB-encoded values, as Apple's does, in Gamma and Linear projects alike.
 
 **Demo.** Package Manager → Liquid Glass → Samples → **Demo**. Add `LiquidGlassDemo` to an empty GameObject and press Play.
 

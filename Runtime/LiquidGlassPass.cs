@@ -177,16 +177,19 @@ namespace UnityLiquidGlass
                 { name = "Liquid glass frame (mips)", useMipMap = true, autoGenerateMips = true, filterMode = FilterMode.Trilinear, wrapMode = TextureWrapMode.Clamp };
             }
             ScreenCapture.CaptureScreenshotIntoRenderTexture(_frame);
-            Graphics.Blit(_frame, _mipped);   // the frost reads the mips
+            bool linear = QualitySettings.activeColorSpace == ColorSpace.Linear;
+            // The frost reads the mips, sRGB-encoded in both colour spaces (Layer pass 2).
+            if (linear) Graphics.Blit(_frame, _mipped, _layer, 2);
+            else Graphics.Blit(_frame, _mipped);
             LiquidGlass.Apply(_glass);
             _glass.SetTexture(SharpTex, _mipped);
             _glass.SetVector(GlassScreen, new Vector4(w, h, 0, 0));
             // The copy comes out upside down where the texture origin is the top (Metal, D3D, Vulkan).
             float flip = SystemInfo.graphicsUVStartsAtTop ? 1f : 0f;
-            bool linear = QualitySettings.activeColorSpace == ColorSpace.Linear;
             _layer.SetFloat(ToLinear, linear ? 1f : 0f);
 
-            var layer = ugui ? RenderTexture.GetTemporary(w, h, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear) : null;
+            // Linear values in 8 bits lose the darkest tones (the glass over black came out 0.051, not 0.075).
+            var layer = ugui ? RenderTexture.GetTemporary(w, h, 0, linear ? RenderTextureFormat.ARGBHalf : RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear) : null;
             RenderTexture.active = layer;
             if (ugui) GL.Clear(false, true, Color.clear);
             GL.PushMatrix();

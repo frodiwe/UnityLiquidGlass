@@ -62,5 +62,22 @@ Shader "Hidden/LiquidGlass/Layer"
             }
             ENDCG
         }
+
+        // 2: the frame copy sRGB-encoded (Linear projects), before its mips are built: Apple's glass
+        // blurs and tones encoded values, and averaging dark lines in linear light comes out too bright.
+        Pass
+        {
+            Blend Off
+            CGPROGRAM
+            #pragma vertex vert_img
+            #pragma fragment frag
+            sampler2D _MainTex;
+            half4 frag(v2f_img i) : SV_Target
+            {
+                half4 c = tex2D(_MainTex, i.uv);
+                return half4(LinearToGammaSpace(max(c.rgb, 0)), c.a);
+            }
+            ENDCG
+        }
     }
 }
