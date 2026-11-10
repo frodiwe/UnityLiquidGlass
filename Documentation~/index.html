@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Liquid Glass in Unity: Apple's glass, taken apart</title>
+<title>How Liquid Glass is built</title>
 <style>
   :root { --ink:#1d1d1f; --mute:#6e6e73; --line:#d2d2d7; --bg:#fbfbfd; --card:#fff; --accent:#0071e3; }
   * { box-sizing: border-box; }
@@ -41,64 +41,55 @@
   th { color:var(--mute); font-weight:600; font-size:13px; }
   .three { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:14px; }
   .three figure { margin:0; }
+  .stages { display:grid; grid-template-columns: repeat(5, 1fr); gap:6px; font-size:13px; color:var(--mute); text-align:center; margin-top:6px; }
+  .stages b { color:var(--ink); display:block; font-size:14px; }
   @media (max-width: 680px) { .two, .three, .lab .row { grid-template-columns: 1fr; } h1 { font-size:34px; } }
 </style>
 </head>
 <body>
 <main>
 
-<h1>Liquid Glass in Unity</h1>
-<p class="lead">Apple's iOS 26 glass, taken apart and rebuilt as a Unity shader: measured with probes in the iOS simulator, then read out of Apple's own shaders and live layer tree. Same layers, same order, same numbers.</p>
+<h1>How Liquid Glass is built</h1>
+<p class="lead">Apple's iOS 26 glass is one small shader with five steps. Here is each step, what Apple does to keep it fast, and a Unity version that matches it within a few shades.</p>
 
 <div class="two">
   <figure><img src="img/apple.png" alt="Apple's .clear glass over a test grid"><figcaption>Apple, SwiftUI <code>.glassEffect(.clear)</code></figcaption></figure>
-  <figure><img src="img/ours.png" alt="This package over the same grid"><figcaption>Unity, this package, default settings: the same backdrop and shapes. Over the glass the two differ by 8 of 255 on average (3 to 5 inside, the rest in the outermost points of the rim).</figcaption></figure>
-</div>
-<div class="two">
-  <figure><img src="img/apple_regular.png" alt="Apple's .regular glass"><figcaption>Apple <code>.glassEffect(.regular)</code></figcaption></figure>
-  <figure><img src="img/ours_regular.png" alt="This package with matte 1"><figcaption>Unity, <code>matte = 1</code>, with Apple's shadow around each shape.</figcaption></figure>
+  <figure><img src="img/ours.png" alt="This package over the same grid"><figcaption>This package in Unity, same backdrop and shapes</figcaption></figure>
 </div>
 
-<!-- 1 -->
-<h2><small>Mistake</small>Fitting a curve to screenshots</h2>
-<p>The first version of this package was tuned by eye and by script against screenshots of Apple's glass: a remap from the shape's middle line to its outline, scaled to the shape, plus saturation, brightness and a white tint picked on game art. It came close on the one board it was fitted to and drifted everywhere else. Circles of another size bent the grid differently, and colours came out more orange than Apple's. A good fit is not the same model, so the second version measures each layer on its own.</p>
+<h2 id="recipe"><small>The recipe</small>Five steps over what is behind</h2>
+<figure><img src="img/stages.png" alt="The glass, one step at a time">
+<div class="stages"><div><b>Backdrop</b>what is behind</div><div><b>Blur</b>σ 1.65 pt</div><div><b>Bend</b>a rounded edge</div><div><b>Tone</b>one colour matrix</div><div><b>Light</b>a hairline</div></div></figure>
+<p>All five steps read one thing about the shape at every pixel: the <b>signed distance</b> to its outline (negative inside) and the direction to it, the <b>normal</b>. Apple keeps the shape as a distance field, so a circle, a capsule, a rounded rectangle or a whole group of buttons is the same input to the glass.</p>
 
-<!-- 2 -->
-<h2><small>Step 1</small>Probe one layer at a time</h2>
-<p>Each probe is a tiny SwiftUI app in the iOS simulator, built so that only one property of the glass can change the picture:</p>
-<div class="three">
-  <figure><img src="img/probe_flat.png" alt="Glass over flat colours"><figcaption><b>Flat colours</b> show the tone alone: there is nothing to refract or blur.</figcaption></figure>
-  <figure><img src="img/probe_ramp.png" alt="Glass over position-coded ramps"><figcaption><b>Position-coded ramps</b> (red = x, green = y) show where each pixel samples the backdrop. A blur leaves a linear ramp unchanged.</figcaption></figure>
-  <figure><img src="img/probe_edge.png" alt="Glass over an edge and a line"><figcaption><b>An edge and a 1 pt line</b> under the flat middle give the blur's kernel.</figcaption></figure>
-</div>
-<p>What they showed, for <code>.clear</code>:</p>
-<table>
-  <tr><th>Layer</th><th>Measured</th></tr>
-  <tr><td>Tone</td><td><code>0.075 + 1.04 × colour</code> per sRGB channel, no saturation change. A 1-pixel black and white stripe pattern comes out 0.596: Apple averages sRGB-encoded values, not linear light.</td></tr>
-  <tr><td>Blur</td><td>A plain Gaussian, σ 1.65 pt, before the refraction. Blurring after refracting fits Apple's board half as well.</td></tr>
-  <tr><td>Refraction</td><td>Only along the normal, none in the middle, and a function of the depth in <b>points</b> from the outline, not of the shape's size: circles of 56 and 112 pt shift by the same amount at the same depth.</td></tr>
-  <tr><td>Rim</td><td>A hairline about 1 pt wide, brightest at 135° and 315°, gone at 45° and 225°. Its colour depends on what is under it: it glows over dark blue and vanishes over bright green.</td></tr>
-</table>
+<h2><small>Step 1</small>Blur, before anything bends</h2>
+<p>The backdrop is blurred first, with a plain Gaussian of σ 1.65 pt for <code>.clear</code>. The bend comes after it, so the squeezed edge shows a squeezed blur instead of thin, sharp copies of each line. The blur is half as strong right at the outline, which keeps the rim crisp.</p>
+<p>Apple never runs a blur kernel per pixel. The backdrop is shrunk into a pyramid of mip levels once, and the glass reads <b>one sample</b> at a fractional level: <code>lod = log2(radius)</code>. A blur of any size costs a single texture read.</p>
 
-<!-- 3 -->
-<h2><small>Step 2</small>Open the box</h2>
-<p>Liquid Glass is drawn by Core Animation. The iOS runtime that ships with Xcode's simulator holds its shaders in <code>QuartzCore.framework/default.metallib</code>: 168 modules of LLVM bitcode, which a stock bitcode reader opens. The glass is a <code>CAFilter</code> called <code>glassBackground</code> on a <code>CABackdropLayer</code>, with a <code>CASDFKeyFillHighlightEffect</code> and a <code>vibrantColorMatrix</code> filter on a layer above it for the rim. Its uniforms name every part:</p>
-<pre><span class="c">// GlassBackgroundUniforms (QuartzCore, iOS 26.5)</span>
-displacement_mat  inner_refraction_amount  inner_refraction_inv_height  outer_refraction_amount
-blur_radius  blur_alpha0..3  blur_dist0..3        <span class="c">// a blur that changes with the distance to the edge</span>
-face_cm0..2                                      <span class="c">// the glass's colour matrix</span>
-bleed_cm0..2  edge_bleed_amount  bleed_darken    <span class="c">// a second, much blurrier sample, mixed by luma</span>
-shadow_cm0..2  shadow_amount  shadow_offset  shadow_opacity</pre>
-<p>The refraction is three lines of the shader, here as GLSL:</p>
-<pre><span class="k">float</span> t = saturate(-d * inner_refraction_inv_height);    <span class="c">// d: signed distance, negative inside</span>
-<span class="k">float</span> s = sqrt(t * (<span class="v">2.</span> - t));                          <span class="c">// sqrt(1 - (1 - t)²): a quarter circle</span>
-uv += (inner_refraction_amount * (<span class="v">1.</span> - s)) * (displacement_mat * normal);</pre>
-<p>A flat slab whose edge is a quarter circle of fixed height, so the bezel's width is set in points. The numbers come from the running app: walk the layer tree and read each filter's inputs by key.</p>
-<pre><span class="c">// glassBackground on a 112 pt .clear circle</span>
-inputInnerRefractionAmount = <span class="v">-60</span>    inputInnerRefractionHeight = <span class="v">20</span>
-inputBlurRadius = <span class="v">1</span>                  inputBlurOpacity0..1 = <span class="v">1</span>, <span class="v">0.5</span>
-inputFaceColorMatrixBlack = <span class="v">0.075</span>   <span class="c">// the measured lift, exactly</span>
-<span class="c">// across sizes S (the shorter side): amount = -min(S, 60), height = min(0.36 S, 20)</span></pre>
+<h2 id="bend"><small>Step 2</small>Bend: a slab with a rounded edge</h2>
+<p>Picture the glass as a flat slab whose edge is rounded off by a quarter circle. Where the slab is flat, light goes straight through and you see what is right behind it. On the rounded edge the surface tilts, light bends inwards, and you see something further in. The closer to the outline, the stronger the tilt, so the image near the rim is pulled from deep inside the button. That is why straight lines curl near the edge, and why, right at the outline, the image flips: the outermost rays cross the ones next to them.</p>
+<figure><svg viewBox="0 0 760 250" width="100%" role="img" aria-label="Cross-section of the glass slab">
+  <defs><marker id="ra" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#0071e3"/></marker></defs>
+  <g stroke="#c7c7cc" stroke-width="2"><line x1="40" y1="212" x2="40" y2="222"/><line x1="70" y1="212" x2="70" y2="222"/><line x1="100" y1="212" x2="100" y2="222"/><line x1="130" y1="212" x2="130" y2="222"/><line x1="160" y1="212" x2="160" y2="222"/><line x1="190" y1="212" x2="190" y2="222"/><line x1="220" y1="212" x2="220" y2="222"/><line x1="250" y1="212" x2="250" y2="222"/><line x1="280" y1="212" x2="280" y2="222"/><line x1="310" y1="212" x2="310" y2="222"/><line x1="340" y1="212" x2="340" y2="222"/><line x1="370" y1="212" x2="370" y2="222"/><line x1="400" y1="212" x2="400" y2="222"/><line x1="430" y1="212" x2="430" y2="222"/><line x1="460" y1="212" x2="460" y2="222"/><line x1="490" y1="212" x2="490" y2="222"/><line x1="520" y1="212" x2="520" y2="222"/><line x1="550" y1="212" x2="550" y2="222"/><line x1="580" y1="212" x2="580" y2="222"/><line x1="610" y1="212" x2="610" y2="222"/><line x1="640" y1="212" x2="640" y2="222"/><line x1="670" y1="212" x2="670" y2="222"/><line x1="700" y1="212" x2="700" y2="222"/><line x1="730" y1="212" x2="730" y2="222"/></g>
+  <line x1="20" y1="212" x2="740" y2="212" stroke="#26264d" stroke-width="2"/>
+  <text x="20" y="244" font-size="16" fill="#6e6e73">the backdrop</text>
+  <path d="M200 60 L560 60 A90 90 0 0 1 650 150 L110 150 A90 90 0 0 1 200 60 Z" fill="#dff0ff" stroke="#8ab8e6" stroke-width="2"/>
+  <g stroke="#0071e3" stroke-width="2.5" fill="none" marker-end="url(#ra)">
+    <path d="M300 24 L300 205"/><path d="M420 24 L420 205"/><path d="M585 24 L585 64 L566 205"/><path d="M615 24 L615 79 L552 205"/><path d="M640 24 L640 109 L522 205"/>
+  </g>
+  <text x="360" y="16" font-size="16" text-anchor="middle" fill="#1d1d1f">flat: straight through</text>
+  <text x="640" y="16" font-size="16" text-anchor="end" fill="#1d1d1f">rounded: bent inwards</text>
+  <line x1="560" y1="172" x2="650" y2="172" stroke="#6e6e73"/><line x1="560" y1="166" x2="560" y2="178" stroke="#6e6e73"/><line x1="650" y1="166" x2="650" y2="178" stroke="#6e6e73"/>
+  <text x="605" y="194" font-size="15" text-anchor="middle" fill="#6e6e73">H</text>
+</svg></figure>
+<p>In the shader that is three lines. <code>H</code> is the width of the rounded edge, <code>A</code> how far in the very outline looks:</p>
+<pre><span class="c">// 0 at the outline, 1 where it turns flat</span>
+<span class="k">float</span> t = saturate(-d / H);
+<span class="c">// the rounded edge's height there</span>
+<span class="k">float</span> height = sqrt(t * (<span class="v">2.</span> - t));
+<span class="c">// thinner glass looks further in</span>
+uv += normal * (-A * (<span class="v">1.</span> - height));</pre>
+<p>The edge has a fixed width in points: <code>H = 20 pt</code> and <code>A = 60 pt</code> on any shape of 56 pt or more, scaled down (0.36 S and S) on smaller ones. A 112 pt circle does not get a wider rim than a 56 pt one, only a larger flat middle.</p>
 <figure><svg viewBox="0 0 760 380" width="100%" role="img" aria-label="Measured bezel displacement against Apple's formula">
 <line x1="56" x2="740" y1="20.0" y2="20.0" stroke="#e5e5ea"/><text x="48" y="24.0" text-anchor="end" font-size="12" fill="#6e6e73">0</text>
 <line x1="56" x2="740" y1="98.5" y2="98.5" stroke="#e5e5ea"/><text x="48" y="102.5" text-anchor="end" font-size="12" fill="#6e6e73">-10</text>
@@ -234,69 +225,62 @@ inputFaceColorMatrixBlack = <span class="v">0.075</span>   <span class="c">// th
 <circle cx="740.0" cy="22.5" r="3" fill="#ff3b30"/>
 <circle cx="560" cy="108" r="4" fill="#ff3b30"/><text x="570" y="112" font-size="13">circle 112 pt</text>
 <text x="560" y="136" font-size="12" fill="#6e6e73">dots: measured · lines: Apple's formula</text>
-</svg><figcaption>The shift at each depth, measured on the ramps for five shapes (dots), against Apple's formula with the amounts read from the filter (lines). Shapes of 56 pt and more share one curve; smaller ones get a proportionally narrower and shallower bezel.</figcaption></figure>
-<p>The rim's colour is a fixed matrix applied to what lies under it: near white over dark and neutral colours, and over a bright green its red and blue go negative, so the line disappears.</p>
-<pre><span class="c">// vibrantColorMatrix on the highlight layer</span>
-R' =  <span class="v">1.20</span>·r − <span class="v">1.00</span>·g − <span class="v">0.10</span>·b + <span class="v">0.9</span>
-G' = −<span class="v">0.30</span>·r + <span class="v">0.50</span>·g − <span class="v">0.10</span>·b + <span class="v">0.9</span>
-B' = −<span class="v">0.30</span>·r − <span class="v">1.00</span>·g + <span class="v">1.40</span>·b + <span class="v">0.9</span>
-<span class="c">// CASDFKeyFillHighlightEffect: key light at -45°, fill light at 135°, each spread π/2, amount 0.5</span></pre>
-
-<!-- 4 -->
-<h2><small>Step 3</small>The same layers, in the same order</h2>
-<ol>
-  <li><b>Blur</b> the backdrop: Gaussian, σ 1.65 pt, half as strong a point inside the outline.</li>
-  <li><b>Refract</b> it by the quarter-circle bezel: 20 pt wide, at most 0.36 of a small shape's shorter side.</li>
-  <li><b>Tone</b>: <code>0.075 + 1.04 × colour</code> on sRGB values.</li>
-  <li><b>Hairline</b>: two opposite lights, in the vibrant colour of what lies under it.</li>
-</ol>
-<p>Drag the glass. The plot shows the bezel's shift for the current size.</p>
+</svg><figcaption>How far in each point looks, measured on Apple's glass for five shapes (dots) and given by the three lines above (curves).</figcaption></figure>
 <div class="lab" id="lab1">
   <div class="row">
     <canvas class="gl" width="900" height="560"></canvas>
     <div>
       <canvas class="plot" width="520" height="360"></canvas>
-      <div class="hint">How far in the glass samples (y, pt) at each depth inside its outline (x, pt).</div>
+      <div class="hint">How far in the glass looks (y, pt) at each depth inside its outline (x, pt).</div>
     </div>
   </div>
   <div class="ctl" data-params="size bezelWidth bezelDepth frostRadius lift gain specular" data-checks="pill blur tone" data-preset="clear"></div>
+  <div class="hint">Drag the glass. Turn off blur and tone to see the bend alone.</div>
 </div>
 
-<!-- 5 -->
-<h2><small>Trap</small>Linear colour space</h2>
-<p>Apple's glass works on sRGB-encoded values. In a Unity project set to Linear, the frame copy holds linear light, and the same shader made black glass 0.30 instead of 0.075. Encoding the samples is not enough. The blur reads mip levels, and mips averaged in linear light turn thin dark lines into a lighter haze. So in a Linear project the package encodes the frame copy to sRGB <i>before</i> its mips are built, decodes once at the end, and draws the uGUI layer in half floats so the darkest tones survive. Both colour spaces now land within 4 of 255 of Apple on flat colours.</p>
+<h2><small>Step 3</small>Tone: one matrix</h2>
+<p>What the glass shows goes through one colour matrix. For <code>.clear</code> it is a small lift and gain, <code>0.075 + 1.04 × colour</code>, with no change to saturation: blacks turn charcoal, everything else a touch brighter. Apple applies it to sRGB-encoded values, not linear light, and the blur averages encoded values too. In a Unity project set to Linear, the package encodes the frame before building its mips; otherwise thin dark lines blur into a lighter haze.</p>
 
-<!-- 6 -->
-<h2 id="regular"><small>Step 4</small><code>.regular</code>: the frosted one</h2>
-<p><code>.regular</code> is the same filter with other inputs: a shallower bezel (0.8 S deep, 0.25 S wide), a blur that grows with the shape (σ ≈ 0.046 S), a whiter tone, a second very blurry <i>bleed</i> sample, and a shadow. Three of its behaviours only showed up in probes:</p>
-<table>
-  <tr><th>Behaviour</th><th>Measured</th></tr>
-  <tr><td>Small glass turns dark</td><td>A shape whose shorter side is under 66 pt flips to a dark variant (<code>0.072 + 0.307 × colour</code>) when the backdrop under it has a luma under about 0.19. Larger shapes never do. The filter's inputs stay the same; the flip happens in the render server.</td></tr>
-  <tr><td>Tone</td><td>Large shapes: <code>0.696 + 0.293 × colour</code>, colour 2.27× as saturated. Small shapes in the light variant follow the shader's face and bleed mix, fitted within 2 of 255.</td></tr>
-  <tr><td>Shadow</td><td>A multiplier on what is under it, the same on every colour: the outline blurred by σ 17 pt, moved 8 pt down (<code>inputShadowOffset</code> 0, 8), down to 0.84× next to a 56 pt shape. It fades to half over near-white.</td></tr>
-</table>
+<h2><small>Step 4</small>Light: a hairline from two lamps</h2>
+<p>The rim is a line about a point wide, lit by a key light from the top left and a fill light from the bottom right, and dark halfway between them. Its colour is a fixed matrix of what lies under it: near white over dark and grey backdrops, and over bright green its red and blue fall below zero, so the line disappears.</p>
+<pre>R' =  <span class="v">1.20</span>·r − <span class="v">1.00</span>·g − <span class="v">0.10</span>·b + <span class="v">0.9</span>
+G' = −<span class="v">0.30</span>·r + <span class="v">0.50</span>·g − <span class="v">0.10</span>·b + <span class="v">0.9</span>
+B' = −<span class="v">0.30</span>·r − <span class="v">1.00</span>·g + <span class="v">1.40</span>·b + <span class="v">0.9</span></pre>
+
+<h2><small>Step 5</small><code>.regular</code>: frost, shadow, dark mode</h2>
 <div class="two">
-  <figure><img src="img/regular_small.png" alt="Small regular glass over black"><figcaption>Apple <code>.regular</code> over black: 56 pt and smaller turn dark…</figcaption></figure>
-  <figure><img src="img/regular_large.png" alt="Large regular glass over black"><figcaption>…while 68 pt and larger stay light.</figcaption></figure>
+  <figure><img src="img/apple_regular.png" alt="Apple's .regular glass"><figcaption>Apple <code>.regular</code></figcaption></figure>
+  <figure><img src="img/ours_regular.png" alt="This package with matte 1"><figcaption>This package, <code>matte = 1</code></figcaption></figure>
 </div>
-<p>Drag the small glass onto the dark card, and change its size or <b>matte</b>:</p>
+<p>The frosted glass is the same shader with other numbers, plus two layers that <code>.clear</code> keeps off:</p>
+<ul>
+  <li><b>More blur, scaled to the shape</b> (σ ≈ 0.046 S) and a shallower edge (0.8 S deep, 0.25 S wide).</li>
+  <li><b>A whiter tone</b>, <code>0.696 + 0.293 × colour</code>, with colour 2.3× as saturated so it still shows through the frost.</li>
+  <li><b>A shadow</b> around the shape: the outline blurred by 17 pt and moved 8 pt down, multiplying whatever is under it.</li>
+  <li><b>A dark mode for small glass.</b> A shape under 66 pt turns dark when the backdrop under it is dark; larger ones never do.</li>
+</ul>
+<div class="two">
+  <figure><img src="img/regular_small.png" alt="Small regular glass over black"><figcaption>Over black, a 56 pt <code>.regular</code> turns dark…</figcaption></figure>
+  <figure><img src="img/regular_large.png" alt="Large regular glass over black"><figcaption>…a 112 pt one stays light.</figcaption></figure>
+</div>
 <div class="lab" id="lab2">
   <canvas class="gl" width="900" height="560"></canvas>
   <div class="ctl" data-params="matte size frostRadius specular" data-checks="pill" data-preset="regular"></div>
+  <div class="hint">Drag the small glass onto the dark card, then make it larger than 66 pt.</div>
 </div>
 
-<!-- 7 -->
-<h2><small>Step 5</small>Any shape</h2>
-<p>The lens only needs three things at each point: the distance to the outline, the direction to it, and how deep the shape is. A rounded box gives them by formula. For any other outline, the package builds them once from a sprite's alpha, as a signed distance field.</p>
-<figure><img src="img/heart.png" alt="Heart-shaped glass" style="max-width:420px"><figcaption>A heart-shaped glass button.</figcaption></figure>
-<pre><span class="c">// uGUI</span>
-glass.shape = mySprite;                       <span class="c">// the glass takes the sprite's outline</span>
-<span class="c">// UI Toolkit</span>
-LiquidGlass.<span class="n">Toolkit</span>(myButton, mySprite);</pre>
+<h2 id="speed"><small>Speed</small>How Apple keeps it cheap</h2>
+<ul>
+  <li><b>One read per pixel.</b> The blur lives in a mip pyramid, built by small downsample passes, including a compute version for Apple's GPUs. The glass itself reads it once, at a fractional level. The whole glass shader, with its shadow and bleed branches, reads the texture at most 8 times.</li>
+  <li><b>Distance fields, not geometry.</b> Simple shapes get an exact formula: a <i>supercircle</i>, Apple's continuous-corner squircle. Other outlines are turned into a distance field once, by jump flooding, and reused every frame.</li>
+  <li><b>Half precision.</b> Every glass shader ships in two builds, with 16-bit and with 32-bit floats; half precision runs up to twice as fast on mobile GPUs.</li>
+  <li><b>Specialised shaders.</b> Core Animation's shader is one big “uber” shader with switches (function constants). Pipelines are compiled with the unused parts cut out, and the glass has its own variants, such as one without the bleed sample (<code>glass_background_no_bleed</code>).</li>
+  <li><b>Only where needed.</b> Pixels outside the shape and its shadow are discarded early.</li>
+</ul>
+<p>This package does the same work in Unity's own terms: the finished frame is copied once, its mips are built by the GPU, and each glass shape is one quad drawn after everything else (below). It blurs with 32 taps around the bent point rather than one, which matches Apple's look more closely on a single mip chain.</p>
 
-<!-- 8 -->
-<h2><small>Step 6</small>Putting it in a real UI: the frame's last pass</h2>
-<p>Glass needs the finished picture under it, including popups, scrolling lists and video, in the same frame. So the glass is drawn <i>after everything else</i>:</p>
+<h2><small>In a real UI</small>The frame's last pass</h2>
+<p>Glass needs the finished picture under it, popups and scrolling lists included, in the same frame. So it is drawn after everything else:</p>
 
 <svg viewBox="0 0 820 300" width="100%" role="img" aria-label="Frame pass diagram">
   <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#6e6e73"/></marker></defs>
@@ -337,19 +321,24 @@ LiquidGlass.<span class="n">Toolkit</span>(myButton, mySprite);</pre>
   </g>
 </svg>
 
-<!-- 9 -->
-<h2><small>Result</small>Against Apple</h2>
-<p>Unity in the iOS simulator against SwiftUI on the same backdrop and shapes, differences on a 0–255 scale:</p>
-<table>
-  <tr><th></th><th>Gamma project</th><th>Linear project</th></tr>
-  <tr><td><code>.clear</code>, the board above, over the glass</td><td>8.2</td><td>8.1</td></tr>
-  <tr><td><code>.clear</code>, flat colours, largest error</td><td>0.4</td><td>4</td></tr>
-  <tr><td><code>.regular</code>, the board above, inside the glass / around it</td><td colspan="2">5.9 inside / 0.7 in the shadow (Linear)</td></tr>
-  <tr><td><code>.regular</code>, flat colours, 112 pt / 56 pt</td><td colspan="2">1.2 / 2.0, root mean square (Linear)</td></tr>
-</table>
-<p>What is left is mostly in the outermost points of the rim, where a pixel spans a steep part of the bezel.</p>
+<h2><small>Any shape</small>From a sprite</h2>
+<p>Since every step only needs a distance and a normal, any outline works: the package turns a sprite's alpha into a distance field once.</p>
+<figure><img src="img/heart.png" alt="Heart-shaped glass" style="max-width:420px"></figure>
 
-<!-- 10 -->
+<h2><small>How we know</small>Probes and the shader itself</h2>
+<p>Each number above was measured twice. First with tiny SwiftUI probes in the iOS simulator, each built so that one step alone changes the picture: flat colours for the tone, colour ramps that encode position for the bend, an edge for the blur. Then by reading the glass out of the system: its shaders in <code>QuartzCore.framework/default.metallib</code>, and the filter's inputs in a running app's layer tree.</p>
+<div class="three">
+  <figure><img src="img/probe_flat.png" alt="Glass over flat colours"><figcaption>Flat colours: the tone</figcaption></figure>
+  <figure><img src="img/probe_ramp.png" alt="Glass over position-coded ramps"><figcaption>Ramps (red = x, green = y): the bend</figcaption></figure>
+  <figure><img src="img/probe_edge.png" alt="Glass over an edge and a line"><figcaption>An edge and a line: the blur</figcaption></figure>
+</div>
+<table>
+  <tr><th>Unity against Apple, 0–255</th><th>Gamma</th><th>Linear</th></tr>
+  <tr><td><code>.clear</code>, the test board</td><td>8.2</td><td>8.1</td></tr>
+  <tr><td><code>.clear</code>, flat colours (worst)</td><td>0.4</td><td>4</td></tr>
+  <tr><td><code>.regular</code>, inside / shadow</td><td></td><td>5.9 / 0.7</td></tr>
+</table>
+
 <h2><small>Use it</small>Two lines</h2>
 <pre><span class="c">// Package Manager → Install from git URL: https://github.com/frodiwe/UnityLiquidGlass.git</span>
 <span class="c">// uGUI: add the Liquid Glass Button component. UI Toolkit:</span>
