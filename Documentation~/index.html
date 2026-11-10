@@ -35,7 +35,9 @@
   canvas.plot { width:100%; background:#fff; border:1px solid var(--line); border-radius:10px; display:block; }
     svg text { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; }
   table { border-collapse: collapse; width:100%; font-size:15px; margin:12px 0 24px; }
-  th, td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--line); }
+  th, td { text-align:left; vertical-align:top; padding:7px 10px; border-bottom:1px solid var(--line); }
+  td:first-child { width:30%; font-weight:600; }
+  h2 code { font: inherit; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .9em; }
   th { color:var(--mute); font-weight:600; font-size:13px; }
   .three { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:14px; }
   .three figure { margin:0; }
@@ -265,7 +267,7 @@ B' = −<span class="v">0.30</span>·r − <span class="v">1.00</span>·g + <spa
 <p>Apple's glass works on sRGB-encoded values. In a Unity project set to Linear, the frame copy holds linear light, and the same shader made black glass 0.30 instead of 0.075. Encoding the samples is not enough. The blur reads mip levels, and mips averaged in linear light turn thin dark lines into a lighter haze. So in a Linear project the package encodes the frame copy to sRGB <i>before</i> its mips are built, decodes once at the end, and draws the uGUI layer in half floats so the darkest tones survive. Both colour spaces now land within 4 of 255 of Apple on flat colours.</p>
 
 <!-- 6 -->
-<h2><small>Step 4</small><code>.regular</code>: the frosted one</h2>
+<h2 id="regular"><small>Step 4</small><code>.regular</code>: the frosted one</h2>
 <p><code>.regular</code> is the same filter with other inputs: a shallower bezel (0.8 S deep, 0.25 S wide), a blur that grows with the shape (σ ≈ 0.046 S), a whiter tone, a second very blurry <i>bleed</i> sample, and a shadow. Three of its behaviours only showed up in probes:</p>
 <table>
   <tr><th>Behaviour</th><th>Measured</th></tr>
