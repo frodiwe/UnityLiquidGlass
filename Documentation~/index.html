@@ -12,6 +12,7 @@
   h1 { font-size: 44px; line-height:1.1; letter-spacing:-.02em; margin: 0 0 12px; }
   h2 { font-size: 28px; letter-spacing:-.01em; margin: 72px 0 8px; }
   h2 small { display:block; font-size:13px; color:var(--mute); font-weight:600; text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px; }
+  h3 { font-size: 19px; margin: 32px 0 6px; }
   p { margin: 8px 0 16px; }
   .lead { color:var(--mute); font-size:20px; }
   figure { margin: 20px 0 28px; }
@@ -43,14 +44,14 @@
   .three figure { margin:0; }
   .stages { display:grid; grid-template-columns: repeat(5, 1fr); gap:6px; font-size:13px; color:var(--mute); text-align:center; margin-top:6px; }
   .stages b { color:var(--ink); display:block; font-size:14px; }
-  @media (max-width: 680px) { .two, .three, .lab .row { grid-template-columns: 1fr; } h1 { font-size:34px; } }
+  @media (max-width: 680px) { pre, pre code { font-size: 11px; padding: 12px; } .two, .three, .lab .row { grid-template-columns: 1fr; } h1 { font-size:34px; } }
 </style>
 </head>
 <body>
 <main>
 
 <h1>How Liquid Glass is built</h1>
-<p class="lead">Apple's iOS 26 glass is one small shader with five steps. Here is each step, what Apple does to keep it fast, and a Unity version that matches it within a few shades.</p>
+<p class="lead">Apple's iOS 26 glass is one small shader with five steps. Here is each step with its formula, Apple's own code for keeping it fast, and how a Unity version is built into the frame and matches it within a few shades.</p>
 
 <div class="two">
   <figure><img src="img/apple.png" alt="Apple's .clear glass over a test grid"><figcaption>Apple, SwiftUI <code>.glassEffect(.clear)</code></figcaption></figure>
@@ -64,7 +65,7 @@
 
 <h2><small>Step 1</small>Blur, before anything bends</h2>
 <p>The backdrop is blurred first, with a plain Gaussian of σ 1.65 pt for <code>.clear</code>. The bend comes after it, so the squeezed edge shows a squeezed blur instead of thin, sharp copies of each line. The blur is half as strong right at the outline, which keeps the rim crisp.</p>
-<p>Apple never runs a blur kernel per pixel. The backdrop is shrunk into a pyramid of mip levels once, and the glass reads <b>one sample</b> at a fractional level: <code>lod = log2(radius)</code>. A blur of any size costs a single texture read.</p>
+<p>Apple never runs a blur kernel per pixel. The backdrop is shrunk into a pyramid of mip levels once, and the glass reads <b>one sample</b> at a fractional level: <code>lod = log2(radius)</code>. A blur of any size costs a single texture read (Apple's code is in <a href="#speed">Speed</a>).</p>
 
 <h2 id="bend"><small>Step 2</small>Bend: a slab with a rounded edge</h2>
 <p>Picture the glass as a flat slab whose edge is rounded off by a quarter circle. Where the slab is flat, light goes straight through and you see what is right behind it. On the rounded edge the surface tilts, light bends inwards, and you see something further in. The closer to the outline, the stronger the tilt, so the image near the rim is pulled from deep inside the button. That is why straight lines curl near the edge, and why, right at the outline, the image flips: the outermost rays cross the ones next to them.</p>
@@ -82,13 +83,41 @@
   <line x1="560" y1="172" x2="650" y2="172" stroke="#6e6e73"/><line x1="560" y1="166" x2="560" y2="178" stroke="#6e6e73"/><line x1="650" y1="166" x2="650" y2="178" stroke="#6e6e73"/>
   <text x="605" y="194" font-size="15" text-anchor="middle" fill="#6e6e73">H</text>
 </svg></figure>
-<p>In the shader that is three lines. <code>H</code> is the width of the rounded edge, <code>A</code> how far in the very outline looks:</p>
-<pre><span class="c">// 0 at the outline, 1 where it turns flat</span>
-<span class="k">float</span> t = saturate(-d / H);
-<span class="c">// the rounded edge's height there</span>
-<span class="k">float</span> height = sqrt(t * (<span class="v">2.</span> - t));
-<span class="c">// thinner glass looks further in</span>
-uv += normal * (-A * (<span class="v">1.</span> - height));</pre>
+<p>The shader turns that picture into a formula in three moves. Each one needs only the distance <code>d</code> to the outline (negative inside) and the outward normal <code>n</code>.</p>
+<p><b>1. Where across the rim are we?</b> The rounded edge is <code>H</code> wide. Divide the depth inside the outline by it, and you get <code>t</code>, which runs from 0 at the outline to 1 where the glass turns flat. Everything past 1 is the flat middle.</p>
+<pre><span class="k">float</span> t = saturate(-d / H);</pre>
+<p><b>2. How thick is the glass there?</b> The edge is a quarter circle of radius 1, centred under the point where the flat top starts. Its height <code>h</code> at <code>t</code> is the circle's equation, <code>(1 − t)² + h² = 1</code>, solved for <code>h</code>:</p>
+<pre><span class="k">float</span> h = sqrt(<span class="v">1</span> - (<span class="v">1</span> - t) * (<span class="v">1</span> - t));
+<span class="c">// the same, one multiply cheaper:</span>
+<span class="k">float</span> h = sqrt(t * (<span class="v">2</span> - t));</pre>
+<p><b>3. How far in does it look?</b> Not by Snell's law. Apple does not trace a ray through the tilted surface: it uses the missing thickness <code>1 − h</code> as the shift. At the outline (<code>h = 0</code>) a pixel shows what lies the full <code>A</code> points further in; on the flat top (<code>h = 1</code>) it shows what is right under it.</p>
+<pre><span class="c">// -n points inwards; A = 60 pt for .clear</span>
+uv += -n * A * (<span class="v">1</span> - h);</pre>
+<p>That one curve is the whole look. The quarter circle is vertical at the outline, so <code>1 − h</code> falls very fast there and slowly near the flat top, which it meets with no kink. Follow where each pixel reads from on a shape of 56 pt or more (<code>A = 60</code>, <code>H = 20</code>):</p>
+<table>
+  <tr><th>Pixel, pt inside the outline</th><th>Shows the backdrop at, pt inside</th></tr>
+  <tr><td>0</td><td>60</td></tr>
+  <tr><td>2</td><td>35.8</td></tr>
+  <tr><td>5</td><td>25.3</td></tr>
+  <tr><td>10</td><td>18.0</td></tr>
+  <tr><td>13.7</td><td>16.8, the turn</td></tr>
+  <tr><td>20 and on</td><td>itself</td></tr>
+</table>
+<p>The outer 2 pt show a strip 24 pt wide, squeezed twelvefold. And up to 13.7 pt the source runs <i>backwards</i>: moving outwards, the pixels show points ever deeper in, which is a mirror image. It turns where the shift's slope reaches 1; with <code>A/H = 3</code> that is <code>10t² − 20t + 9 = 0</code>, <code>t ≈ 0.68</code>. This mirrored band is the folded reflection you see just inside the rim of Apple's buttons.</p>
+<p>Here is Apple's own code for it, read back from the bitcode of <code>glass_background</code> (the half-precision build; comments ours):</p>
+<pre><span class="c">; %31 = -(dist + inset) * (1/H)</span>
+<span class="c">; t</span>
+%32 = call half @air.saturate.f16(half %31)
+%33 = fsub half 2.0, %32         <span class="c">; 2-t</span>
+%34 = fmul half %33, %32         <span class="c">; t(2-t)</span>
+<span class="c">; h</span>
+%35 = call half @air.sqrt.f16(half %34)
+%36 = call half @air.saturate.f16(half %35)
+%37 = fmul half %36, %30         <span class="c">; h*A</span>
+%38 = fsub half %30, %37         <span class="c">; A-h*A</span>
+%42 = fmul &lt;2 x half&gt; %41, %18 <span class="c">; *n</span>
+%43 = fadd &lt;2 x half&gt; %42, %39 <span class="c">; +pos</span></pre>
+<p>Before this, the normal <code>%18</code> went through a 2×2 matrix from the uniforms, which turns points into texture coordinates and handles a rotated or scaled layer. <code>A</code> and <code>1/H</code> come in as uniforms, worked out once per shape on the CPU, so the GPU never divides.</p>
 <p>The edge has a fixed width in points: <code>H = 20 pt</code> and <code>A = 60 pt</code> on any shape of 56 pt or more, scaled down (0.36 S and S) on smaller ones. A 112 pt circle does not get a wider rim than a 56 pt one, only a larger flat middle.</p>
 <figure><svg viewBox="0 0 760 380" width="100%" role="img" aria-label="Measured bezel displacement against Apple's formula">
 <line x1="56" x2="740" y1="20.0" y2="20.0" stroke="#e5e5ea"/><text x="48" y="24.0" text-anchor="end" font-size="12" fill="#6e6e73">0</text>
@@ -270,14 +299,65 @@ B' = −<span class="v">0.30</span>·r − <span class="v">1.00</span>·g + <spa
 </div>
 
 <h2 id="speed"><small>Speed</small>How Apple keeps it cheap</h2>
-<ul>
-  <li><b>One read per pixel.</b> The blur lives in a mip pyramid, built by small downsample passes, including a compute version for Apple's GPUs. The glass itself reads it once, at a fractional level. The whole glass shader, with its shadow and bleed branches, reads the texture at most 8 times.</li>
-  <li><b>Distance fields, not geometry.</b> Simple shapes get an exact formula: a <i>supercircle</i>, Apple's continuous-corner squircle. Other outlines are turned into a distance field once, by jump flooding, and reused every frame.</li>
-  <li><b>Half precision.</b> Every glass shader ships in two builds, with 16-bit and with 32-bit floats; half precision runs up to twice as fast on mobile GPUs.</li>
-  <li><b>Specialised shaders.</b> Core Animation's shader is one big “uber” shader with switches (function constants). Pipelines are compiled with the unused parts cut out, and the glass has its own variants, such as one without the bleed sample (<code>glass_background_no_bleed</code>).</li>
-  <li><b>Only where needed.</b> Pixels outside the shape and its shadow are discarded early.</li>
-</ul>
-<p>This package does the same work in Unity's own terms: the finished frame is copied once, its mips are built by the GPU, and each glass shape is one quad drawn after everything else (below). It blurs with 32 taps around the bent point rather than one, which matches Apple's look more closely on a single mip chain.</p>
+<p>Glass sits on screen all the time, over scrolling content, at 120 Hz, on a phone. All the code below is read back from <code>QuartzCore.framework/default.metallib</code> in the iOS 26 simulator and rewritten from LLVM bitcode as Metal. The names are ours; the operations and the numbers are Apple's.</p>
+
+<h3>1. A blur of any size costs one read</h3>
+<p>The backdrop is shrunk into a mip pyramid once per frame. The glass then reads it <b>once</b>, at a fractional level; the GPU's trilinear filter blends the two nearest levels, so the blur can change smoothly from pixel to pixel:</p>
+<pre><span class="c">// glass_background_base</span>
+<span class="k">half</span> r = u.blurRadius;
+<span class="k">if</span> (r &lt; <span class="v">2</span>) r = <span class="v">1</span> + r * <span class="v">0.5</span>;  <span class="c">// gentle below 2 px</span>
+<span class="k">half</span> lod = max(<span class="v">0</span>, log2(r));
+<span class="k">half4</span> c = tex.sample(s, uv, level(lod));
+c.rgb /= max(c.a, <span class="v">1e-4</span>);  <span class="c">// un-premultiply</span></pre>
+<p>Counting the shadow and bleed branches, the whole glass shader reads the texture at most 8 times. A 13×13 Gaussian done the plain way would read it 169 times per pixel.</p>
+
+<h3>2. The pyramid is a Gaussian, not boxes</h3>
+<p>A plain mip chain averages 2×2 boxes, and a single read from it looks blocky. So Core Animation builds its levels with a small blur on the way down. One direction of <code>downsample_blur_2_frag</code>:</p>
+<pre><span class="c">// 7 reads; the pair at ±o shares a weight</span>
+<span class="k">float4</span> c = w.x *  T(uv)
+         + w.y * (T(uv + o[<span class="v">0</span>]) + T(uv - o[<span class="v">0</span>]))
+         + w.z * (T(uv + o[<span class="v">1</span>]) + T(uv - o[<span class="v">1</span>]))
+         + w.w * (T(uv + o[<span class="v">2</span>]) + T(uv - o[<span class="v">2</span>]));
+c.rgb *= u.gain;</pre>
+<p>Offsets and weights are uniforms, so one shader serves every radius. With bilinear filtering, a read placed between two texels averages both: the usual way to get a wide kernel from few reads. Plain shrinking passes, <code>downsample_4/6/8_frag</code>, take 4 weighted reads each.</p>
+
+<h3>3. Throw pixels away early</h3>
+<p>The glass is drawn on a quad big enough for its shadow, so many of its pixels show nothing at all. They leave before any texture read:</p>
+<pre><span class="c">// the shadow's edge: an S-curve from a polynomial,</span>
+<span class="c">// no blur pass and no texture</span>
+<span class="k">half</span> x = saturate(sd * u.shadowScale * <span class="v">.25</span>
+                  + <span class="v">.5</span>) * <span class="v">4</span> - <span class="v">2</span>;
+<span class="k">half</span> x2 = x * x;
+<span class="k">half</span> fall = x * (((<span class="v">.00295</span> * x2 - <span class="v">.0345</span>) * x2
+           + <span class="v">.168</span>) * x2 - <span class="v">.561</span>) + <span class="v">.5</span>;
+<span class="k">if</span> (fall * mask * u.shadowAlpha &lt; <span class="v">1e-4</span>
+    &amp;&amp; coverage == <span class="v">0</span>)
+    discard_fragment();</pre>
+<p>So the shadow never needs a blurred copy of the shape: its soft edge is this polynomial, falling from 1 to 0 in four multiply-adds. The anti-aliased outline is a single line, from the distance field and its screen-space derivative (<code>sdf_glass_displacement</code>):</p>
+<pre><span class="k">float</span> aa = max(fwidth(d), <span class="v">1e-4</span>);
+<span class="k">float</span> coverage = saturate(d / aa + <span class="v">.5</span>);</pre>
+
+<h3>4. Half precision</h3>
+<p>Every shader is compiled twice, as <code>glass_background_lph</code> and <code>glass_background_lpf</code>: with 16-bit and with 32-bit floats. In the half build the bend above is all <code>half</code> (<code>@air.sqrt.f16</code>, <code>@air.saturate.f16</code>), and the coordinate is widened to 32 bits only for the texture read. On Apple's GPUs half math runs up to twice as fast and needs half the registers.</p>
+
+<h3>5. Shapes as formulas</h3>
+<p>Rounded rectangles and capsules never become a texture. <code>supercircle_sdf</code> computes the distance to Apple's continuous-corner squircle in closed form: a few <code>min</code>/<code>max</code>, a polynomial in the corner's angle and one square root, all in registers. Only outlines with no formula take the slow path: <code>brim_init</code> seeds a texture with the outline, and <code>brim_jump</code> spreads the nearest seed across it by jump flooding:</p>
+<pre><span class="c">// brim_jump: one pass; step halves every pass</span>
+<span class="k">for</span> (<span class="k">int</span> y = -<span class="v">1</span>; y &lt;= <span class="v">1</span>; y++)
+<span class="k">for</span> (<span class="k">int</span> x = -<span class="v">1</span>; x &lt;= <span class="v">1</span>; x++) {
+    <span class="k">uint2</span> s = seeds.read(px + <span class="k">int2</span>(x, y) * step).xy;
+    <span class="k">if</span> (s.x == <span class="v">0</span>) <span class="k">continue</span>;  <span class="c">// no seed yet</span>
+    <span class="k">float</span> d = distance(<span class="k">float2</span>(px), <span class="k">float2</span>(s))
+            + subpixel(s); <span class="c">// edge alpha</span>
+    <span class="k">if</span> (d &lt; best) { best = d; nearest = s; }
+}</pre>
+<p>A 512 px field takes 9 such passes (log₂ 512), not a search of every pixel against every edge.</p>
+
+<h3>6. One shader, many pipelines</h3>
+<p>Core Animation draws almost everything with one “uber” shader full of switches such as <code>fc_has_chroma_matrix</code> and <code>fc_has_texture_matrix</code>. These are Metal <i>function constants</i>: fixed when the pipeline is built, so the compiler deletes the branches that are off and each layer gets a shader with no dead code. The glass is split the same way: <code>glass_background</code> or <code>glass_background_sdf</code> (shape from a formula or from a field), each with a <code>_no_bleed</code> variant that skips the extra “bleed” read.</p>
+
+<h3>And in Unity</h3>
+<p>Unity's mips are 2×2 boxes, and making them Gaussian would cost a pass per level. So the package reads around the bent point 32 times, in a circle, from a mip level about as coarse as the gap between reads. On a coarse mip, neighbouring reads mostly hit the same texels in the cache. The rest follows Apple: the distance field, the bend, one tone, and one pass at the end of the frame.</p>
 
 <h2><small>In a real UI</small>The frame's last pass</h2>
 <p>Glass needs the finished picture under it, popups and scrolling lists included, in the same frame. So it is drawn after everything else:</p>
@@ -320,6 +400,51 @@ B' = −<span class="v">0.30</span>·r − <span class="v">1.00</span>·g + <spa
     <text x="444" y="260" fill="#1d1d1f">one layer, which is cut by the marker in one step.</text>
   </g>
 </svg>
+
+<h3>1. The marker</h3>
+<p>In the normal UI pass a glass button draws nothing you can see. Its shader writes only to the alpha channel, and writes 0:</p>
+<pre><span class="c">// Marker.shader</span>
+Blend One Zero
+ColorMask A  <span class="c">// colour stays for the copy</span>
+...
+<span class="k">half4</span> frag(v2f i) : SV_Target {
+    clip(i.color.a - <span class="v">.001</span>);
+    <span class="k">return</span> <span class="v">0</span>;
+}</pre>
+<p>Anything drawn over the button later blends as usual, and uGUI's blending writes alpha too: an opaque popup puts it back to 1. At the end of the frame the screen's alpha is a map of how much of each button is still uncovered. No list of which UI covers what, no raycasts.</p>
+
+<h3>2. After everything else</h3>
+<p>A coroutine waits for <code>WaitForEndOfFrame</code>: every camera and every Overlay canvas has drawn, and the picture is not yet on screen. Then the pass copies the frame and builds its mips:</p>
+<pre><span class="k">IEnumerator</span> EveryFrame() {
+    <span class="k">var</span> end = <span class="k">new</span> WaitForEndOfFrame();
+    <span class="k">while</span> (<span class="k">true</span>) { <span class="k">yield return</span> end; Draw(); }
+}
+
+<span class="c">// in Draw(), only when some glass is visible:</span>
+ScreenCapture.CaptureScreenshotIntoRenderTexture(_frame);
+<span class="c">// Linear: encode to sRGB first (see Tone)</span>
+Graphics.Blit(_frame, _mipped, _layer, <span class="v">2</span>);
+<span class="c">// autoGenerateMips: the GPU builds them</span></pre>
+<p><code>CaptureScreenshotIntoRenderTexture</code> is a GPU copy, not a read back to the CPU. It works the same in the Built-in pipeline and URP, which is why the package needs no renderer feature.</p>
+
+<h3>3. Glass and content into one layer</h3>
+<p>Each button is one quad in pixel coordinates, drawn with the glass shader over the copy. Its icons and text follow, drawn again with their own meshes and materials:</p>
+<pre>RenderTexture.active = layer;
+GL.Clear(<span class="k">false</span>, <span class="k">true</span>, Color.clear);
+GL.LoadPixelMatrix(<span class="v">0</span>, w, <span class="v">0</span>, h);
+<span class="k">foreach</span> (<span class="k">var</span> b <span class="k">in</span> _buttons) {
+    Glass(rect, ...);   <span class="c">// one quad</span>
+    <span class="k">foreach</span> (<span class="k">var</span> g <span class="k">in</span> _content[b])
+        DrawContent(g); <span class="c">// DrawMeshNow</span>
+}</pre>
+
+<h3>4. Cut by the marker, onto the screen</h3>
+<p>One full-screen quad puts the layer on the screen, scaled by what the marker says is still uncovered:</p>
+<pre><span class="c">// Layer.shader, pass 1</span>
+<span class="c">// Blend One OneMinusSrcAlpha</span>
+<span class="k">half</span> uncovered = <span class="v">1</span> - tex2D(_Frame, fuv).a;
+<span class="k">return</span> tex2D(_Layer, uv) * uncovered;</pre>
+<p>Where a popup covers half a button, the frame's alpha there is 1, and that half of the glass, and of its label, disappears in the same multiply. The frame and its mips are kept between frames; the whole pass is skipped when no glass is visible.</p>
 
 <h2><small>Any shape</small>From a sprite</h2>
 <p>Since every step only needs a distance and a normal, any outline works: the package turns a sprite's alpha into a distance field once.</p>
