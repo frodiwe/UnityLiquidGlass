@@ -311,15 +311,25 @@ B' = −<span class="v">0.30</span>·r − <span class="v">1.00</span>·g + <spa
 c.rgb /= max(c.a, <span class="v">1e-4</span>);  <span class="c">// un-premultiply</span></pre>
 <p>Counting the shadow and bleed branches, the whole glass shader reads the texture at most 8 times. A 13×13 Gaussian done the plain way would read it 169 times per pixel.</p>
 
-<h3>2. The pyramid is a Gaussian, not boxes</h3>
-<p>A plain mip chain averages 2×2 boxes, and a single read from it looks blocky. So Core Animation builds its levels with a small blur on the way down. One direction of <code>downsample_blur_2_frag</code>:</p>
-<pre><span class="c">// 7 reads; the pair at ±o shares a weight</span>
-<span class="k">float4</span> c = w.x *  T(uv)
-         + w.y * (T(uv + o[<span class="v">0</span>]) + T(uv - o[<span class="v">0</span>]))
-         + w.z * (T(uv + o[<span class="v">1</span>]) + T(uv - o[<span class="v">1</span>]))
-         + w.w * (T(uv + o[<span class="v">2</span>]) + T(uv - o[<span class="v">2</span>]));
-c.rgb *= u.gain;</pre>
-<p>Offsets and weights are uniforms, so one shader serves every radius. With bilinear filtering, a read placed between two texels averages both: the usual way to get a wide kernel from few reads. Plain shrinking passes, <code>downsample_4/6/8_frag</code>, take 4 weighted reads each.</p>
+<h3 id="pyramid">2. The pyramid is a Gaussian, not boxes</h3>
+<p>A plain mip chain averages 2×2 boxes, and a single read from it looks blocky. So Core Animation builds its own pyramid. Which passes run, and with which parameters, the shader file cannot tell: offsets and weights arrive from the CPU. So we watched them live. A test app renders a <code>.regular</code> glass through <code>CARenderer</code>, which runs Core Animation's real passes inside the app, and logs every Metal pipeline and its buffers. One glass, one frame:</p>
+<pre><span class="c">// pipelines, in order (fragment function | label)</span>
+downsample_4_frag_lpf             <span class="c">| PBGRA_Tds4</span>
+variable_blur_downsample_frag_lpf <span class="c">| PBGRA_Tvrd ×4</span>
+glass_background_sdf_lpf          <span class="c">| PBGRABsov_Tghs</span></pre>
+<p><b>First, shrink by 4.</b> <code>downsample_4</code> reads four times, one texel off diagonally, with weight 0.25 each. Live values:</p>
+<pre>offsets ±0.000833 = 1 texel of 1200 px, diagonal
+weights 0.25 0.25 0.25 0.25</pre>
+<p>Each read lands on the corner between four texels, so bilinear filtering averages those four for free: four reads give a 4×4 box, sixteen texels.</p>
+<p><b>Then four blurred halvings.</b> <code>variable_blur_downsample</code> runs once per level; the live uniforms are the level number and its texel size, which doubles each time (1/192, 1/96, 1/48, 1/24). The kernel itself is in the shader, 13 reads in a cross and a diamond:</p>
+<pre><span class="c">// variable_blur_downsample_base; o = texel size</span>
+<span class="k">float4</span> c = <span class="v">.10550</span> * T(uv)
+  + <span class="v">.09019</span> * (T(±<span class="v">1.96</span> o, <span class="v">0</span>) + T(<span class="v">0</span>, ±<span class="v">1.96</span> o))
+  + <span class="v">.07710</span> * T(±<span class="v">1.96</span> o, ±<span class="v">1.96</span> o)
+  + <span class="v">.05634</span> * (T(±<span class="v">3.92</span> o, <span class="v">0</span>) + T(<span class="v">0</span>, ±<span class="v">3.92</span> o));
+<span class="c">// 1 + 4 + 4 + 4 reads; the weights sum to 1</span></pre>
+<p>These weights are a Gaussian with σ = 3.5 texels, sampled at distances 0, 1.96, 2.77 and 3.92: <code>.1055·exp(−r²/24.5)</code> gives .09019, .07710 and .05635. Each level is a Gaussian blur of the one before, at half the size, so the pyramid holds a smooth blur at every scale. The glass then picks its level with <code>log2(radius)</code> and reads once.</p>
+<p>The whole blur for one glass: 4 + 4×13 reads at ever smaller sizes, plus one read per glass pixel. A direct Gaussian of the same width would take hundreds of reads per pixel.</p>
 
 <h3>3. Throw pixels away early</h3>
 <p>The glass is drawn on a quad big enough for its shadow, so many of its pixels show nothing at all. They leave before any texture read:</p>
