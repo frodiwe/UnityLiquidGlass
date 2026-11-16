@@ -77,8 +77,14 @@ public sealed class LiquidGlassDemo : MonoBehaviour
         var doc = new GameObject("UI Toolkit").AddComponent<UIDocument>();
         doc.panelSettings = settings;
         var root = doc.rootVisualElement;
-        var button = new UnityEngine.UIElements.Button(() =>
-            LiquidGlass.Settings.matte = LiquidGlass.Settings.matte > .5f ? 0f : 1f) { text = "UI Toolkit · tap: clear / regular" };
+        UnityEngine.UIElements.Button button = null;
+        // Every glass here switches between Apple's two presets; each button can have its own look.
+        button = new UnityEngine.UIElements.Button(() =>
+        {
+            var look = LiquidGlass.GetLook(button).matte > .5f ? LiquidGlass.Look.Clear : LiquidGlass.Look.Regular;
+            LiquidGlass.SetLook(button, look);
+            foreach (var g in FindObjectsByType<LiquidGlassButton>(FindObjectsSortMode.None)) g.look = look;
+        }) { text = "UI Toolkit · tap: clear / regular" };
         var s = button.style;
         s.position = Position.Absolute; s.width = 330; s.height = 56; s.top = 700; s.left = 50;
         s.fontSize = 18; s.unityTextAlign = TextAnchor.MiddleCenter; s.color = new Color(.1f, .1f, .15f);

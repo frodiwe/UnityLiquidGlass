@@ -28,6 +28,7 @@ float4 _SharpTex_TexelSize;
 float  _Liquid, _LensStrength, _BezelDepth, _BezelWidth, _BezelFraction, _Dispersion;
 float  _FrostRadius, _FrostEdge, _Lift, _Gain, _Saturation, _Matte, _Specular, _Highlight;
 float4 _LightDir;
+half4  _Tint;   // Apple's .tint(): an sRGB colour over what the glass shows, alpha its strength
 
 // A custom shape (radius < 0): its outline as a signed distance field (ShapeField), sampled over the
 // shape's rect. r: distance in texels (negative inside), gb: the outward normal.
@@ -155,6 +156,8 @@ half3 LiquidFinish(half3 c, half3 rimLight)
     half grey = dot(c, half3(.299, .587, .114));
     half3 clear = saturate(_Lift + _Gain * (grey + (c - grey) * (_Saturation > 0 ? _Saturation : 1)));
     c = _Matte > 0 ? lerp(clear, saturate(LiquidRegular(c, rimLight.z)), _Matte) : clear;
+    // ponytail: a plain mix, not measured from Apple's tinted glass; fit it on probes if it must match.
+    c = lerp(c, _Tint.rgb, _Tint.a);
     // Apple's vibrant colour matrix for the highlight: near white over dark and neutral colours, the
     // colour itself over bright ones (over a bright green the line disappears).
     half3 v = saturate(half3(dot(c, half3(1.2024, -1.0014, -.1010)),

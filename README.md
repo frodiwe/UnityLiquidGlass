@@ -43,22 +43,28 @@ LiquidGlass.Toolkit(myBadge, badgeSprite);         // any shape: the sprite's ou
 
 The element's own background and border are replaced by the glass. Its text and children are drawn on top, and it still takes the taps.
 
-**The look.** One look is shared by every glass shape, and you can change it at any time:
+**The look.** Every glass is Apple's `.clear` unless you give it another look. Each button has its own look, and you can change it at any time. A look offers only what Apple's glass offers:
+
+- **Presets:** `Look.Clear` and `Look.Regular`, as `.glassEffect(.clear)` and `.glassEffect(.regular)`.
+- **Matte:** `matte`, from 0 (`.clear`) to 1 (`.regular`).
+- **Tint:** `tint`, a colour over the glass as `.tint()`. Its alpha sets the strength.
 
 ```csharp
-LiquidGlass.Settings.matte = 1;          // 0 = Apple's .clear, 1 = .regular
-LiquidGlass.Settings.frostRadius = 4;    // softer
-LiquidGlass.Settings.lightAngle = 45;    // light from the top right
+glass.look = LiquidGlass.Look.Regular;                    // uGUI, or set it in the Inspector
+glass.look = new LiquidGlass.Look { matte = .5f };        // halfway between the two
+glass.look.tint = new Color(0, .5f, 1, .3f);              // a blue tint
+LiquidGlass.Toolkit(myButton, look: LiquidGlass.Look.Regular);
+LiquidGlass.SetLook(myButton, LiquidGlass.Look.Clear);    // UI Toolkit, later
 ```
 
-Every field has a tooltip. The defaults are Apple's `.clear`, read from its running `glassBackground` filter in the iOS 26 simulator and checked on probes: the glass is built in Apple's order, from the same parts:
+Everything else is Apple's own numbers, fixed in the code. They were read from its running `glassBackground` filter in the iOS 26 simulator and checked on probes. The glass is built in Apple's order, from the same parts:
 
 1. The backdrop is blurred (Gaussian, σ 1.65 pt), lighter towards the outline.
 2. A bezel along the outline refracts it. Its width is fixed in points (20 pt, at most 0.36 of a small shape's shorter side) and its profile is a quarter circle. The middle is flat, with no magnification.
 3. One tone over what the glass shows: 0.075 + 1.04 × colour, per sRGB channel.
 4. A hairline lit by two opposite lights, in a colour taken from what lies under it.
 
-All of it works on sRGB-encoded values, as Apple's does, in Gamma and Linear projects alike.
+The tint is a plain mix and has not yet been fitted to Apple's tinted glass. All of it works on sRGB-encoded values, as Apple's does, in Gamma and Linear projects alike.
 
 `matte = 1` is Apple's `.regular`, measured the same way: a shallower bezel, a blur that grows with the shape, a whiter tone, a soft shadow, and on shapes under 66 pt a dark variant over dark backdrops, as Apple's small glass turns dark.
 

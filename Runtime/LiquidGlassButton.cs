@@ -16,6 +16,8 @@ namespace UnityLiquidGlass
         public float inset;
         [Tooltip("A custom shape: the glass takes this sprite's outline (its alpha), stretched over the rect. Empty = a rounded box.")]
         public Sprite shape;
+        [Tooltip("How the glass looks: Apple's .clear (matte 0) to .regular (matte 1), and a tint. Change it at any time.")]
+        public LiquidGlass.Look look = LiquidGlass.Look.Clear;
 
         internal Graphic Shape;
 

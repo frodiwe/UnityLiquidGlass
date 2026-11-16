@@ -474,12 +474,27 @@ GL.LoadPixelMatrix(<span class="v">0</span>, w, <span class="v">0</span>, h);
   <tr><td><code>.regular</code>, inside / shadow</td><td></td><td>5.9 / 0.7</td></tr>
 </table>
 
-<h2><small>Use it</small>Two lines</h2>
+<h2><small>Use it</small>A few lines</h2>
 <pre><span class="c">// Package Manager → Install from git URL: https://github.com/frodiwe/UnityLiquidGlass.git</span>
-<span class="c">// uGUI: add the Liquid Glass Button component. UI Toolkit:</span>
 <span class="k">using</span> UnityLiquidGlass;
-LiquidGlass.<span class="n">Toolkit</span>(myButton);
-LiquidGlass.Settings.matte = <span class="v">1</span>;   <span class="c">// Apple's .regular</span></pre>
+
+<span class="c">// uGUI: the Liquid Glass Button component on any UI object with a Graphic.</span>
+<span class="k">var</span> glass = button.AddComponent&lt;LiquidGlassButton&gt;();
+
+<span class="c">// UI Toolkit: one call per element.</span>
+LiquidGlass.<span class="n">Toolkit</span>(myButton);</pre>
+<p>Every glass gets Apple's <code>.clear</code> by default. Each button can have its own look, and the look offers only what Apple's glass offers:</p>
+<ul>
+<li><b>Presets.</b> <code>Look.Clear</code> and <code>Look.Regular</code>, the same as SwiftUI's <code>.glassEffect(.clear)</code> and <code>.glassEffect(.regular)</code>.</li>
+<li><b>Matte.</b> <code>matte</code> goes from 0 to 1. Values in between blend <code>.clear</code> into <code>.regular</code>, all the parts of step 5 included.</li>
+<li><b>Tint.</b> <code>tint</code> is a colour laid over the glass, like <code>.tint()</code>, and its alpha sets the strength.</li>
+</ul>
+<pre>glass.look = LiquidGlass.Look.Regular;                       <span class="c">// .regular</span>
+glass.look = <span class="k">new</span> LiquidGlass.Look { matte = <span class="v">.5f</span> };          <span class="c">// halfway</span>
+glass.look.tint = <span class="k">new</span> Color(<span class="v">0</span>, <span class="v">.5f</span>, <span class="v">1</span>, <span class="v">.3f</span>);                  <span class="c">// a blue tint</span>
+LiquidGlass.<span class="n">Toolkit</span>(myButton, look: LiquidGlass.Look.Regular);
+LiquidGlass.<span class="n">SetLook</span>(myButton, LiquidGlass.Look.Clear);    <span class="c">// change it later</span></pre>
+<p>All the other numbers in this article (the bezel, the blur, the tone, the light) are Apple's own and fixed in the code. The sliders above only show what each one does. The tint is a plain mix and has not yet been fitted to Apple's tinted glass.</p>
 <p><a href="https://github.com/frodiwe/UnityLiquidGlass">github.com/frodiwe/UnityLiquidGlass</a></p>
 
 </main>

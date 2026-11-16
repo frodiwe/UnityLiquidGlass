@@ -25,6 +25,7 @@ namespace UnityLiquidGlass
             public float Radius;
             public Sprite Shape;
             public ToolkitContentCopy Copy;
+            public LiquidGlass.Look Look;
         }
 
         static LiquidGlassPass _instance;
@@ -90,6 +91,12 @@ namespace UnityLiquidGlass
         {
             var p = Instance;
             if (!Has(item.Element)) p._toolkit.Add(item);
+        }
+
+        internal static void SetLook(VisualElement element, LiquidGlass.Look look)
+        {
+            if (_instance == null) return;
+            foreach (var t in _instance._toolkit) if (t.Element == element) t.Look = look;
         }
 
         internal static bool Has(VisualElement element)
@@ -181,7 +188,6 @@ namespace UnityLiquidGlass
             // The frost reads the mips, sRGB-encoded in both colour spaces (Layer pass 2).
             if (linear) Graphics.Blit(_frame, _mipped, _layer, 2);
             else Graphics.Blit(_frame, _mipped);
-            LiquidGlass.Apply(_glass);
             _glass.SetTexture(SharpTex, _mipped);
             _glass.SetVector(GlassScreen, new Vector4(w, h, 0, 0));
             // The copy comes out upside down where the texture origin is the top (Metal, D3D, Vulkan).
@@ -190,17 +196,16 @@ namespace UnityLiquidGlass
 
             // .regular casts a soft shadow around each shape, straight onto the screen before the glass. A uGUI
             // shape's shadow shows only while its marker survived at its centre (nothing drawn over it).
-            if (LiquidGlass.Settings.matte > 0)
             {
                 RenderTexture.active = null;   // the blit above left the mips as the target
                 GL.PushMatrix();
                 GL.LoadPixelMatrix(0, w, 0, h);
                 if (ugui) foreach (var b in _buttons)
-                    if (UguiRect(b, out var r, out float units) is var a && a > .001f)
-                        Shadow(r, units, b.cornerRadius, b.shape, a, flip, linear, marker: true);
+                    if (Casts(b.look) && UguiRect(b, out var r, out float units) is var a && a > .001f)
+                        Shadow(r, units, b.cornerRadius, b.shape, a, flip, linear, marker: true, b.look);
                 foreach (var t in _toolkit)
-                    if (ToolkitRect(t, w, h, out var r, out float units) is var a && a > .001f)
-                        Shadow(r, units, t.Radius, t.Shape, a, flip, linear, marker: false);
+                    if (Casts(t.Look) && ToolkitRect(t, w, h, out var r, out float units) is var a && a > .001f)
+                        Shadow(r, units, t.Radius, t.Shape, a, flip, linear, marker: false, t.Look);
                 GL.PopMatrix();
             }
 
@@ -217,7 +222,7 @@ namespace UnityLiquidGlass
             {
                 float alpha = UguiRect(b, out var r, out float units);
                 if (alpha <= .001f) continue;
-                Glass(r, units, b.cornerRadius, b.shape, alpha, flip);
+                Glass(r, units, b.cornerRadius, b.shape, alpha, flip, b.look);
                 drew = true;
                 foreach (var g in _content[b]) DrawContent(g);
             }
@@ -237,7 +242,7 @@ namespace UnityLiquidGlass
             {
                 float alpha = ToolkitRect(t, w, h, out var r, out float toScreen);
                 if (alpha <= .001f) continue;
-                Glass(r, toScreen, t.Radius, t.Shape, alpha, flip);
+                Glass(r, toScreen, t.Radius, t.Shape, alpha, flip, t.Look);
                 if (t.Copy.Texture != null && t.Copy.Crop.width > 0)
                     // Unity's own render texture reads right side up in a quad on every API; it holds straight alpha.
                     TexQuad(PanelToScreen(t.Copy.Crop, toScreen, h), t.Copy.Texture, alpha, premultiplied: false);
@@ -270,8 +275,12 @@ namespace UnityLiquidGlass
             return r.width > 0 && r.height > 0 ? alpha : 0f;
         }
 
-        void Shadow(Rect r, float units, float radius, Sprite shape, float alpha, float flip, bool linear, bool marker)
+        // .regular (matte) casts a soft shadow.
+        static bool Casts(LiquidGlass.Look look) => look != null && look.matte > 0;
+
+        void Shadow(Rect r, float units, float radius, Sprite shape, float alpha, float flip, bool linear, bool marker, LiquidGlass.Look look)
         {
+            LiquidGlass.Apply(_glass, look);
             SetShape(r, units, radius, shape, alpha, flip);
             _glass.SetVector(GlassShadow, new Vector4(marker ? 1f : 0f, linear ? 1f : 0f, 0, 0));
             _glass.SetPass(1);
@@ -279,8 +288,9 @@ namespace UnityLiquidGlass
             Quad(Rect.MinMaxRect(r.xMin - m, r.yMin - m, r.xMax + m, r.yMax + m));
         }
 
-        void Glass(Rect r, float units, float radius, Sprite shape, float alpha, float flip)
+        void Glass(Rect r, float units, float radius, Sprite shape, float alpha, float flip, LiquidGlass.Look look)
         {
+            LiquidGlass.Apply(_glass, look);
             SetShape(r, units, radius, shape, alpha, flip);
             _glass.SetPass(0);
             Quad(r);
